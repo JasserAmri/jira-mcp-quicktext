@@ -18,6 +18,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { selectTransport, getTransportConfig } from "./src/transports/transport-manager.js";
 
 // Jira configuration
 const JIRA_BASE_URL = "https://jira.quicktext.im";
@@ -1905,12 +1906,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 // Start server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("QuickText Jira MCP Server v4.1 running on stdio");
+  // Get transport configuration from environment
+  const config = getTransportConfig();
+  
+  // Select transport based on MCP_TRANSPORT env variable
+  const transportConfig = await selectTransport(config.mode, {
+    port: config.httpPort,
+    bindAddress: config.bindAddress,
+    corsOrigin: config.corsOrigin,
+  });
+
+  if (transportConfig.type === "http") {
+    // HTTP transport initialization
+    await transportConfig.init(server);
+    console.error(`[Transport] HTTP/SSE mode active on ${config.bindAddress}:${config.httpPort}`);
+  } else {
+    // STDIO transport (default)
+    await server.connect(transportConfig.transport);
+    console.error("[Transport] QuickText Jira MCP Server v4.1 running on stdio");
+  }
 }
 
 main().catch((error) => {
-  console.error("Fatal error in main():", error);
+  console.error("[Fatal] Error in main():", error);
   process.exit(1);
 });
