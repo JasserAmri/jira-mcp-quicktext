@@ -1,0 +1,355 @@
+{
+  "info": {
+    "name": "JIRA MCP Server - Streamable HTTP",
+    "description": "Test collection for JIRA MCP Server using Streamable HTTP protocol (2025-03-26)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "jira-mcp-streamable-http",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Check server health and status"
+      },
+      "response": []
+    },
+    {
+      "name": "1. Establish SSE Connection (GET /mcp)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "text/event-stream",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Establish SSE connection and retrieve session ID from Mcp-Session-Id header"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Extract session ID from response header",
+              "var sessionId = pm.response.headers.get('Mcp-Session-Id');",
+              "if (sessionId) {",
+              "    pm.collectionVariables.set('session_id', sessionId);",
+              "    console.log('Session ID captured: ' + sessionId);",
+              "} else {",
+              "    console.log('WARNING: No session ID found in response headers');",
+              "}",
+              "",
+              "// Validate SSE headers",
+              "pm.test('Content-Type is text/event-stream', function() {",
+              "    pm.response.to.have.header('Content-Type', 'text/event-stream');",
+              "});",
+              "",
+              "pm.test('Session ID header present', function() {",
+              "    pm.response.to.have.header('Mcp-Session-Id');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Initialize (POST /mcp)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{session_id}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-03-26\",\n    \"capabilities\": {\n      \"roots\": {\n        \"listChanged\": true\n      },\n      \"sampling\": {}\n    },\n    \"clientInfo\": {\n      \"name\": \"Postman MCP Client\",\n      \"version\": \"1.0.0\"\n    }\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Send initialize request to MCP server"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 202 Accepted', function() {",
+              "    pm.response.to.have.status(202);",
+              "});",
+              "",
+              "pm.test('Response has accepted field', function() {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('accepted');",
+              "    pm.expect(jsonData.accepted).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. List Tools (POST /mcp)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{session_id}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Request list of available tools"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 202 Accepted', function() {",
+              "    pm.response.to.have.status(202);",
+              "});",
+              "",
+              "pm.test('Response has accepted field', function() {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('accepted');",
+              "    pm.expect(jsonData.accepted).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Call Tool - search_issues (POST /mcp)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{session_id}}",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_issues\",\n    \"arguments\": {\n      \"searchString\": \"project = QT ORDER BY created DESC\"\n    }\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Execute search_issues tool with JQL query"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 202 Accepted', function() {",
+              "    pm.response.to.have.status(202);",
+              "});",
+              "",
+              "pm.test('Response has accepted field', function() {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('accepted');",
+              "    pm.expect(jsonData.accepted).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Test Invalid Session (POST /mcp)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Mcp-Session-Id",
+            "value": "invalid-session-id-12345",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 4,\n  \"method\": \"tools/list\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Test invalid session ID handling"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 401 Unauthorized', function() {",
+              "    pm.response.to.have.status(401);",
+              "});",
+              "",
+              "pm.test('Response has error field', function() {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('error');",
+              "    pm.expect(jsonData.error.code).to.eql(-32001);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Test Missing Session ID (POST /mcp)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 5,\n  \"method\": \"tools/list\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Test missing session ID header handling"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 400 Bad Request', function() {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "",
+              "pm.test('Response has error field', function() {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('error');",
+              "    pm.expect(jsonData.error.code).to.eql(-32600);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Delete Session (DELETE /mcp)",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "Mcp-Session-Id",
+            "value": "{{session_id}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{base_url}}/mcp",
+          "host": ["{{base_url}}"],
+          "path": ["mcp"]
+        },
+        "description": "Terminate the session explicitly"
+      },
+      "response": [],
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 204 No Content', function() {",
+              "    pm.response.to.have.status(204);",
+              "});",
+              "",
+              "// Clear session ID after deletion",
+              "pm.collectionVariables.set('session_id', '');"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
