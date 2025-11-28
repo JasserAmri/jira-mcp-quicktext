@@ -29,7 +29,7 @@ The server will automatically use the correct API version and authentication met
 - Clean and transform rich JIRA content for AI context efficiency
 - Support for file attachments with secure multipart upload handling
 - **Supports both Jira Cloud and Jira Server (Data Center) APIs**
-- **Dual transport modes: STDIO (default) and HTTP/SSE for tools like Postman**
+- **Dual transport modes: STDIO (default) and Streamable HTTP (MCP 2025-03-26) for tools like Postman and MCP Inspector**
 
 ## Prerequisites
 
@@ -121,7 +121,7 @@ Add the following configuration under the `mcpServers` object:
 }
 ```
 
-#### Option B: HTTP Transport (Postman & Other HTTP Clients)
+#### Option B: Streamable HTTP Transport (MCP Inspector & Postman)
 
 1. **Start the server in HTTP mode:**
 
@@ -150,26 +150,47 @@ TRANSPORT_MODE=http
 HTTP_PORT=3000
 ```
 
-2. **The server will start with HTTP/SSE endpoints:**
+2. **The server will start with Streamable HTTP endpoint:**
 
 ```
 ╔════════════════════════════════════════════════════════════╗
-║  🚀 JIRA MCP Server - HTTP Transport Mode                 ║
+║  🚀 JIRA MCP Server - Streamable HTTP Transport           ║
 ╠════════════════════════════════════════════════════════════╣
-║  SSE Endpoint:     http://localhost:3000/sse              ║
-║  Message Endpoint: http://localhost:3000/message          ║
-║  Health Check:     http://localhost:3000/health           ║
+║  Protocol:        MCP 2025-03-26 (Streamable HTTP)       ║
+║  Endpoint:        http://localhost:3000/mcp               ║
+║  Health Check:    http://localhost:3000/health            ║
+║                                                            ║
+║  🔧 Supported Methods:                                     ║
+║     GET /mcp     → Establish SSE connection               ║
+║     POST /mcp    → Send JSON-RPC message                  ║
+║     DELETE /mcp  → Terminate session                      ║
 ╚════════════════════════════════════════════════════════════╝
 ```
 
-3. **Configure Postman MCP Client:**
+3. **Configure MCP Inspector:**
+
+In MCP Inspector v0.15.x+, add a new server connection:
+```json
+{
+  "mcpServers": {
+    "jira": {
+      "type": "sse",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+4. **Configure Postman MCP Client:**
 
 In Postman, add a new MCP server connection:
-- **URL**: `http://localhost:3000/sse`
+- **URL**: `http://localhost:3000/mcp`
 - **Method**: GET
 - **Transport**: SSE (Server-Sent Events)
 
-The server will now be accessible via HTTP for testing and development with Postman.
+Or import the provided Postman collection: `tests/manual/postman_collection.json`
+
+The server implements the MCP Streamable HTTP protocol (2025-03-26) with full session management and is compatible with MCP Inspector v0.15.x and Postman MCP Client.
 
 ### 4. Restart the MCP server
 
@@ -314,7 +335,9 @@ Input Schema:
 - Vite for optimized builds
 - **Dual transport support:**
   - **STDIO**: For Claude Desktop and Cline (default)
-  - **HTTP/SSE**: For Postman and HTTP-based MCP clients
+  - **Streamable HTTP (MCP 2025-03-26)**: For MCP Inspector v0.15.x+ and Postman MCP Client
+- Session management with automatic cleanup (1-hour expiry)
+- UUID-based session tracking with `Mcp-Session-Id` headers
 - Uses JIRA REST API v3 (Cloud) or v2 (Server/Data Center)
 - Supports multiple authentication methods:
   - Basic authentication with API tokens or username/password
@@ -349,15 +372,38 @@ The server implements a comprehensive error handling strategy:
 
 ## Transport Modes Comparison
 
-| Feature | STDIO Transport | HTTP Transport |
-|---------|----------------|----------------|
-| **Use Case** | Claude Desktop, Cline | Postman, HTTP clients, debugging |
+| Feature | STDIO Transport | Streamable HTTP Transport |
+|---------|----------------|---------------------------|
+| **Use Case** | Claude Desktop, Cline | MCP Inspector, Postman, HTTP clients |
+| **Protocol** | MCP over stdio | MCP Streamable HTTP (2025-03-26) |
 | **Configuration** | MCP config file | Environment variables |
-| **Connection** | Process stdin/stdout | HTTP Server-Sent Events |
+| **Connection** | Process stdin/stdout | HTTP + Server-Sent Events |
 | **Default Port** | N/A | 3000 |
+| **Session Management** | N/A | Yes (UUID-based, 1-hour expiry) |
+| **Endpoints** | N/A | GET/POST/DELETE `/mcp` |
 | **CORS Support** | N/A | Yes |
 | **Health Check** | No | Yes (`/health` endpoint) |
-| **Best For** | Production AI assistants | Development & testing |
+| **Best For** | Production AI assistants | Development, testing, debugging |
+| **Inspector Compatibility** | N/A | v0.15.x+ |
+
+### Manual Testing
+
+The `tests/manual/` directory contains comprehensive test scripts:
+- `test_sse.sh` - Test SSE connection and session establishment
+- `test_initialize.sh` - Test initialize handshake
+- `test_tools_list.sh` - Test tools/list request
+- `test_tool_execution.sh` - Test tool execution (search_issues)
+- `postman_collection.json` - Complete Postman test collection
+- `README.md` - Detailed testing instructions
+
+Run all tests:
+```bash
+cd tests/manual
+./test_sse.sh
+./test_initialize.sh
+./test_tools_list.sh
+./test_tool_execution.sh
+```
 
 ## LICENCE
 
