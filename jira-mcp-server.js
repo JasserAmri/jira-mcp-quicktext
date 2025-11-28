@@ -1912,18 +1912,22 @@ async function main() {
   // Select transport based on MCP_TRANSPORT env variable
   const transportConfig = await selectTransport(config.mode, {
     port: config.httpPort,
+    endpoint: config.endpoint,
     bindAddress: config.bindAddress,
     corsOrigin: config.corsOrigin,
+    allowedHosts: config.allowedHosts,
+    allowedOrigins: config.allowedOrigins,
+    enableDnsProtection: config.enableDnsProtection,
   });
 
   if (transportConfig.type === "http") {
-    // HTTP transport initialization
+    // StreamableHTTP transport initialization
     await transportConfig.init(server);
-    console.error(`[Transport] HTTP/SSE mode active on ${config.bindAddress}:${config.httpPort}`);
+    console.error(`[Transport] StreamableHTTP mode active on ${config.bindAddress}:${config.httpPort}${config.endpoint}`);
   } else {
     // STDIO transport (default)
     await server.connect(transportConfig.transport);
-    console.error("[Transport] QuickText Jira MCP Server v4.1 running on stdio");
+    console.error("[Transport] QuickText Jira MCP Server v4.2 running on stdio");
   }
 }
 
