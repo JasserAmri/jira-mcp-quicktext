@@ -1,4 +1,4 @@
-import express, { Request, Response } from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { Server as McpServer } from "@modelcontextprotocol/sdk/server/index.js";
 import { randomUUID } from "crypto";
 
@@ -11,6 +11,50 @@ interface Session {
   createdAt: Date;
   lastActivity: Date;
 }
+
+/**
+ * JSON-RPC 2.0 Error object
+ */
+interface JsonRpcError {
+  jsonrpc: "2.0";
+  error: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+  id?: string | number | null;
+}
+
+/**
+ * JSON-RPC 2.0 standard error codes
+ */
+const JSON_RPC_ERROR_CODES = {
+  INVALID_REQUEST: -32600,
+  METHOD_NOT_FOUND: -32601,
+  INVALID_PARAMS: -32602,
+  INTERNAL_ERROR: -32603,
+  SERVER_ERROR: -32000,
+  // Custom MCP error codes
+  UNAUTHORIZED: -32001,
+} as const;
+
+/**
+ * CORS configuration
+ */
+const CORS_CONFIG = {
+  ALLOW_ORIGIN: "*",
+  ALLOW_METHODS: "GET, POST, DELETE, OPTIONS",
+  ALLOW_HEADERS: "Content-Type, Mcp-Session-Id",
+  EXPOSE_HEADERS: "Mcp-Session-Id",
+} as const;
+
+/**
+ * Session timeout configuration
+ */
+const SESSION_CONFIG = {
+  MAX_AGE_MS: 3600000, // 1 hour
+  CLEANUP_INTERVAL_MS: 300000, // 5 minutes
+} as const;
 
 /**
  * Session Manager for MCP Streamable HTTP transport
@@ -101,6 +145,222 @@ class SessionManager {
 }
 
 /**
+ * Validation Helpers
+ */
+
+/**
+ * Validate that session ID header is present
+ * @param sessionId - Session ID from header
+ * @returns true if valid, false otherwise
+ */
+function validateSessionIdHeader(sessionId: string | undefined): sessionId is string {
+  return typeof sessionId === "string" && sessionId.length > 0;
+}
+
+/**
+ * Extract session ID from request headers (case-insensitive)
+ * @param req - Express Request object
+ * @returns Session ID or undefined
+ */
+function extractSessionId(req: Request): string | undefined {
+  return req.headers["mcp-session-id"] as string | undefined;
+}
+
+/**
+ * Error Response Helpers
+ */
+
+/**
+ * Create a JSON-RPC 2.0 error response
+ * @param code - Error code (from JSON_RPC_ERROR_CODES)
+ * @param message - Error message
+ * @param id - Optional JSON-RPC request ID
+ * @returns JSON-RPC error object
+ */
+function createJsonRpcError(
+  code: number,
+  message: string,
+  id?: string | number | null
+): JsonRpcError {
+  return {
+    jsonrpc: "2.0",
+    error: {
+      code,
+      message,
+    },
+    ...(id !== undefined && { id }),
+  };
+}
+
+/**
+ * Send a JSON-RPC error response
+ * @param res - Express Response object
+ * @param statusCode - HTTP status code
+ * @param errorCode - JSON-RPC error code
+ * @param message - Error message
+ */
+function sendJsonRpcError(
+  res: Response,
+  statusCode: number,
+  errorCode: number,
+  message: string
+): void {
+  res.status(statusCode).json(createJsonRpcError(errorCode, message));
+}
+
+/**
+ * Logging Helpers
+ */
+
+/**
+ * Log structured message with context
+ * @param level - Log level (info, warn, error)
+ * @param context - Context (e.g., "GET /mcp", "SessionManager")
+ * @param message - Log message
+ * @param data - Optional additional data
+ */
+function log(
+  level: "info" | "warn" | "error",
+  context: string,
+  message: string,
+  data?: Record<string, unknown>
+): void {
+  const timestamp = new Date().toISOString();
+  const logData = data ? ` ${JSON.stringify(data)}` : "";
+
+  const logMessage = `[${timestamp}] [${context}] ${message}${logData}`;
+
+  switch (level) {
+    case "error":
+      console.error(logMessage);
+      break;
+    case "warn":
+      console.warn(logMessage);
+      break;
+    default:
+      console.log(logMessage);
+  }
+}
+
+/**
+ * Endpoint Handlers
+ */
+
+/**
+ * Handle GET /mcp - Establish SSE connection with session
+ * @param req - Express Request
+ * @param res - Express Response
+ * @param sessionManager - Session manager instance
+ */
+function handleGetMcp(req: Request, res: Response, sessionManager: SessionManager): void {
+  log("info", "GET /mcp", "New SSE connection request");
+
+  // Create new session
+  const sessionId = sessionManager.createSession(res);
+
+  // Set SSE headers
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("Mcp-Session-Id", sessionId);
+
+  // Note: The actual SSE streaming is handled by the MCP SDK
+  // We establish the connection here and the SDK will use this response
+  // to send SSE events
+
+  log("info", "GET /mcp", "Session established", { sessionId });
+
+  // Handle client disconnect
+  req.on("close", () => {
+    log("info", "GET /mcp", "Client disconnected, cleaning up session", { sessionId });
+    sessionManager.deleteSession(sessionId);
+  });
+
+  // Keep connection alive - send initial comment
+  res.write(": MCP Streamable HTTP connection established\n\n");
+}
+
+/**
+ * Handle POST /mcp - Process JSON-RPC messages
+ * @param req - Express Request
+ * @param res - Express Response
+ * @param sessionManager - Session manager instance
+ */
+function handlePostMcp(req: Request, res: Response, sessionManager: SessionManager): void {
+  const sessionId = extractSessionId(req);
+
+  log("info", "POST /mcp", "Received message", { sessionId: sessionId || "MISSING" });
+
+  // Validate session ID header
+  if (!validateSessionIdHeader(sessionId)) {
+    log("warn", "POST /mcp", "Missing Mcp-Session-Id header");
+    sendJsonRpcError(
+      res,
+      400,
+      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
+      "Bad Request: Missing Mcp-Session-Id header"
+    );
+    return;
+  }
+
+  // Validate session exists
+  const session = sessionManager.getSession(sessionId);
+  if (!session) {
+    log("warn", "POST /mcp", "Invalid or expired session", { sessionId });
+    sendJsonRpcError(
+      res,
+      401,
+      JSON_RPC_ERROR_CODES.UNAUTHORIZED,
+      "Unauthorized: Invalid or expired session ID"
+    );
+    return;
+  }
+
+  // Note: The actual message handling is done by the MCP SDK
+  // The SDK connects to the server and processes JSON-RPC messages
+  // We just need to acknowledge receipt here
+
+  log("info", "POST /mcp", "Message accepted", { sessionId });
+  res.status(202).json({ accepted: true });
+}
+
+/**
+ * Handle DELETE /mcp - Terminate session
+ * @param req - Express Request
+ * @param res - Express Response
+ * @param sessionManager - Session manager instance
+ */
+function handleDeleteMcp(req: Request, res: Response, sessionManager: SessionManager): void {
+  const sessionId = extractSessionId(req);
+
+  log("info", "DELETE /mcp", "Session termination request", { sessionId: sessionId || "MISSING" });
+
+  if (sessionId) {
+    sessionManager.deleteSession(sessionId);
+    log("info", "DELETE /mcp", "Session terminated", { sessionId });
+  }
+
+  res.status(204).end();
+}
+
+/**
+ * CORS Middleware
+ * Configures CORS headers for cross-origin requests
+ */
+function configureCors(req: Request, res: Response, next: NextFunction): void {
+  res.header("Access-Control-Allow-Origin", CORS_CONFIG.ALLOW_ORIGIN);
+  res.header("Access-Control-Allow-Methods", CORS_CONFIG.ALLOW_METHODS);
+  res.header("Access-Control-Allow-Headers", CORS_CONFIG.ALLOW_HEADERS);
+  res.header("Access-Control-Expose-Headers", CORS_CONFIG.EXPOSE_HEADERS);
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+}
+
+/**
  * Creates an HTTP transport layer for the MCP server using Streamable HTTP protocol
  * Compliant with MCP Specification 2025-03-26
  * Compatible with MCP Inspector v0.15.x and Postman MCP client
@@ -116,20 +376,28 @@ export async function createHttpTransport(
   const sessionManager = new SessionManager();
 
   // Enable CORS for cross-origin requests
-  app.use((req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type, Mcp-Session-Id");
-    res.header("Access-Control-Expose-Headers", "Mcp-Session-Id");
+  app.use(configureCors);
 
-    if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
+  // Parse JSON bodies with error handling
+  app.use(express.json({
+    limit: "10mb",
+    strict: true,
+  }));
+
+  // Handle JSON parsing errors
+  app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+    if (err instanceof SyntaxError && "body" in err) {
+      log("error", "JSON Parser", "Malformed JSON in request body", { error: err.message });
+      sendJsonRpcError(
+        res,
+        400,
+        JSON_RPC_ERROR_CODES.INVALID_REQUEST,
+        "Bad Request: Malformed JSON"
+      );
+      return;
     }
-    next();
+    next(err);
   });
-
-  // Parse JSON bodies
-  app.use(express.json());
 
   // Health check endpoint
   app.get("/health", (req: Request, res: Response) => {
@@ -149,103 +417,31 @@ export async function createHttpTransport(
    */
   app.all("/mcp", async (req: Request, res: Response) => {
     try {
-      // GET /mcp - Establish SSE connection with session
-      if (req.method === "GET") {
-        console.log("[GET /mcp] New SSE connection request");
+      switch (req.method) {
+        case "GET":
+          handleGetMcp(req, res, sessionManager);
+          break;
 
-        // Create new session
-        const sessionId = sessionManager.createSession(res);
+        case "POST":
+          handlePostMcp(req, res, sessionManager);
+          break;
 
-        // Set SSE headers
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-        res.setHeader("Mcp-Session-Id", sessionId);
+        case "DELETE":
+          handleDeleteMcp(req, res, sessionManager);
+          break;
 
-        // Note: The actual SSE streaming is handled by the MCP SDK
-        // We establish the connection here and the SDK will use this response
-        // to send SSE events
-
-        console.log(`[GET /mcp] Session established: ${sessionId}`);
-
-        // Handle client disconnect
-        req.on("close", () => {
-          console.log(`[GET /mcp] Client disconnected, cleaning up session: ${sessionId}`);
-          sessionManager.deleteSession(sessionId);
-        });
-
-        // Keep connection alive - send initial comment
-        res.write(": MCP Streamable HTTP connection established\n\n");
-
-        return;
-      }
-
-      // POST /mcp - Handle JSON-RPC messages
-      else if (req.method === "POST") {
-        const sessionId = req.headers["mcp-session-id"] as string;
-
-        console.log(`[POST /mcp] Received message for session: ${sessionId || 'MISSING'}`);
-
-        if (!sessionId) {
-          console.warn("[POST /mcp] Missing Mcp-Session-Id header");
-          return res.status(400).json({
-            jsonrpc: "2.0",
-            error: {
-              code: -32600,
-              message: "Bad Request: Missing Mcp-Session-Id header"
-            }
+        default:
+          log("warn", "/mcp", "Unsupported method", { method: req.method });
+          res.status(405).json({
+            error: "Method Not Allowed",
+            allowed: ["GET", "POST", "DELETE"]
           });
-        }
-
-        // Validate session
-        const session = sessionManager.getSession(sessionId);
-        if (!session) {
-          console.warn(`[POST /mcp] Invalid or expired session: ${sessionId}`);
-          return res.status(401).json({
-            jsonrpc: "2.0",
-            error: {
-              code: -32001,
-              message: "Unauthorized: Invalid or expired session ID"
-            }
-          });
-        }
-
-        // Note: The actual message handling is done by the MCP SDK
-        // The SDK connects to the server and processes JSON-RPC messages
-        // We just need to acknowledge receipt here
-
-        console.log(`[POST /mcp] Message accepted for session: ${sessionId}`);
-        res.status(202).json({ accepted: true });
-        return;
       }
-
-      // DELETE /mcp - Terminate session
-      else if (req.method === "DELETE") {
-        const sessionId = req.headers["mcp-session-id"] as string;
-
-        console.log(`[DELETE /mcp] Session termination request: ${sessionId || 'MISSING'}`);
-
-        if (sessionId) {
-          sessionManager.deleteSession(sessionId);
-          console.log(`[DELETE /mcp] Session terminated: ${sessionId}`);
-        }
-
-        res.status(204).end();
-        return;
-      }
-
-      // Unsupported method
-      else {
-        console.warn(`[/mcp] Unsupported method: ${req.method}`);
-        res.status(405).json({
-          error: "Method Not Allowed",
-          allowed: ["GET", "POST", "DELETE"]
-        });
-        return;
-      }
-
     } catch (error) {
-      console.error("[/mcp] Error handling request:", error);
+      log("error", "/mcp", "Error handling request", {
+        error: error instanceof Error ? error.message : "Unknown error",
+        method: req.method
+      });
       res.status(500).json({
         error: "Internal server error",
         message: error instanceof Error ? error.message : "Unknown error"
@@ -253,14 +449,14 @@ export async function createHttpTransport(
     }
   });
 
-  // Automatic cleanup of stale sessions every 5 minutes
+  // Automatic cleanup of stale sessions
   const cleanupInterval = setInterval(() => {
-    sessionManager.cleanupStale(3600000); // 1 hour timeout
-  }, 300000); // 5 minutes
+    sessionManager.cleanupStale(SESSION_CONFIG.MAX_AGE_MS);
+  }, SESSION_CONFIG.CLEANUP_INTERVAL_MS);
 
   // Graceful shutdown
   process.on("SIGTERM", () => {
-    console.log("[HTTP Transport] SIGTERM received, cleaning up...");
+    log("info", "HTTP Transport", "SIGTERM received, cleaning up...");
     clearInterval(cleanupInterval);
   });
 
