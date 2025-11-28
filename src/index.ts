@@ -17,6 +17,8 @@ declare module "bun" {
     JIRA_USER_EMAIL: string;
     JIRA_TYPE: string;
     JIRA_AUTH_TYPE: string;
+    TRANSPORT_MODE: string;
+    HTTP_PORT: string;
   }
 }
 
@@ -29,6 +31,10 @@ const JIRA_TYPE = (process.env.JIRA_TYPE === "server" ? "server" : "cloud") as
 const JIRA_AUTH_TYPE = (process.env.JIRA_AUTH_TYPE === "bearer" ? "bearer" : "basic") as
   | "basic"
   | "bearer";
+
+// Transport configuration
+const TRANSPORT_MODE = (process.env.TRANSPORT_MODE || "stdio") as "stdio" | "http";
+const HTTP_PORT = parseInt(process.env.HTTP_PORT || "3000", 10);
 
 if (!JIRA_API_TOKEN || !JIRA_BASE_URL || !JIRA_USER_EMAIL) {
   throw new Error(
@@ -492,12 +498,32 @@ class JiraServer {
     });
   }
 
+  /**
+   * Run the MCP server with HTTP transport (SSE)
+   * Used when TRANSPORT_MODE=http
+   */
+  async runWithHttpTransport() {
+    const { createHttpTransport } = await import("./transports/http-transport.js");
+    await createHttpTransport(this.server, HTTP_PORT);
+  }
+
+  /**
+   * Run the MCP server with stdio transport (default)
+   * Used when TRANSPORT_MODE=stdio or not specified
+   */
   async run() {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    // JIRA MCP server running on stdio
+    if (TRANSPORT_MODE === "http") {
+      await this.runWithHttpTransport();
+    } else {
+      const transport = new StdioServerTransport();
+      await this.server.connect(transport);
+      console.log("JIRA MCP server running on stdio transport");
+    }
   }
 }
 
 const server = new JiraServer();
-server.run().catch(() => {});
+server.run().catch((error) => {
+  console.error("Failed to start JIRA MCP server:", error);
+  process.exit(1);
+});

@@ -29,6 +29,7 @@ The server will automatically use the correct API version and authentication met
 - Clean and transform rich JIRA content for AI context efficiency
 - Support for file attachments with secure multipart upload handling
 - **Supports both Jira Cloud and Jira Server (Data Center) APIs**
+- **Dual transport modes: STDIO (default) and HTTP/SSE for tools like Postman**
 
 ## Prerequisites
 
@@ -43,6 +44,8 @@ JIRA_BASE_URL=your_jira_instance_url     # e.g., https://your-domain.atlassian.n
 JIRA_USER_EMAIL=your_email               # Your Jira account email
 JIRA_TYPE=cloud                          # 'cloud' or 'server' (optional, defaults to 'cloud')
 JIRA_AUTH_TYPE=basic                     # 'basic' or 'bearer' (optional, defaults to 'basic')
+TRANSPORT_MODE=stdio                     # 'stdio' or 'http' (optional, defaults to 'stdio')
+HTTP_PORT=3000                           # Port for HTTP transport (optional, defaults to 3000)
 ```
 
 ### Authentication Methods
@@ -76,6 +79,10 @@ bun run build
 ```
 
 ### 3. Configure the MCP server
+
+The server supports two transport modes: **STDIO** (default, for Claude Desktop/Cline) and **HTTP** (for Postman and other HTTP-based clients).
+
+#### Option A: STDIO Transport (Default - Claude Desktop/Cline)
 
 Edit the appropriate configuration file:
 
@@ -114,9 +121,61 @@ Add the following configuration under the `mcpServers` object:
 }
 ```
 
+#### Option B: HTTP Transport (Postman & Other HTTP Clients)
+
+1. **Start the server in HTTP mode:**
+
+```bash
+# Set environment variables
+export JIRA_API_TOKEN="your_api_token"
+export JIRA_BASE_URL="your_jira_instance_url"
+export JIRA_USER_EMAIL="your_email"
+export TRANSPORT_MODE="http"
+export HTTP_PORT="3000"  # optional, defaults to 3000
+
+# Run the server
+bun run build/index.js
+```
+
+Or use a `.env` file:
+
+```bash
+# .env
+JIRA_API_TOKEN=your_api_token
+JIRA_BASE_URL=your_jira_instance_url
+JIRA_USER_EMAIL=your_email
+JIRA_TYPE=cloud
+JIRA_AUTH_TYPE=basic
+TRANSPORT_MODE=http
+HTTP_PORT=3000
+```
+
+2. **The server will start with HTTP/SSE endpoints:**
+
+```
+╔════════════════════════════════════════════════════════════╗
+║  🚀 JIRA MCP Server - HTTP Transport Mode                 ║
+╠════════════════════════════════════════════════════════════╣
+║  SSE Endpoint:     http://localhost:3000/sse              ║
+║  Message Endpoint: http://localhost:3000/message          ║
+║  Health Check:     http://localhost:3000/health           ║
+╚════════════════════════════════════════════════════════════╝
+```
+
+3. **Configure Postman MCP Client:**
+
+In Postman, add a new MCP server connection:
+- **URL**: `http://localhost:3000/sse`
+- **Method**: GET
+- **Transport**: SSE (Server-Sent Events)
+
+The server will now be accessible via HTTP for testing and development with Postman.
+
 ### 4. Restart the MCP server
 
-Within Cline's MCP settings, restart the MCP server. Restart Claude Desktop to load the new MCP server.
+**For STDIO mode**: Within Cline's MCP settings, restart the MCP server. Restart Claude Desktop to load the new MCP server.
+
+**For HTTP mode**: Simply run the server with `TRANSPORT_MODE=http` environment variable set.
 
 ## Development
 
@@ -253,6 +312,9 @@ Input Schema:
 - Built with TypeScript in strict mode
 - Uses Bun runtime for improved performance
 - Vite for optimized builds
+- **Dual transport support:**
+  - **STDIO**: For Claude Desktop and Cline (default)
+  - **HTTP/SSE**: For Postman and HTTP-based MCP clients
 - Uses JIRA REST API v3 (Cloud) or v2 (Server/Data Center)
 - Supports multiple authentication methods:
   - Basic authentication with API tokens or username/password
@@ -267,6 +329,7 @@ Input Schema:
   - Epic children: 100 issues per request
 - Support for multipart form data for secure file attachments
 - Automatic content type detection and validation
+- CORS enabled for cross-origin requests in HTTP mode
 
 ## Error Handling
 
@@ -283,6 +346,18 @@ The server implements a comprehensive error handling strategy:
 - Multipart request failure handling
 - Rate limit detection
 - Attachment parameter validation
+
+## Transport Modes Comparison
+
+| Feature | STDIO Transport | HTTP Transport |
+|---------|----------------|----------------|
+| **Use Case** | Claude Desktop, Cline | Postman, HTTP clients, debugging |
+| **Configuration** | MCP config file | Environment variables |
+| **Connection** | Process stdin/stdout | HTTP Server-Sent Events |
+| **Default Port** | N/A | 3000 |
+| **CORS Support** | N/A | Yes |
+| **Health Check** | No | Yes (`/health` endpoint) |
+| **Best For** | Production AI assistants | Development & testing |
 
 ## LICENCE
 
