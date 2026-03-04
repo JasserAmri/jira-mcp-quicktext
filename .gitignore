@@ -16,3 +16,27 @@ coverage/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# IDE / Claude Code config #
+#############################
+.claude/
+.windsurf/
+WINDSURF-CONFIG.md
+
+# Backup & scratch files #
+###########################
+*.bak
+src/index-v4.1-backup.ts
+FIX-APPLIED.md
+
+# Ad-hoc debug & test scripts #
+################################
+analyze-tokens.mjs
+diagnose.bat
+get-valid-board.mjs
+get-valid-sprint.mjs
+list-all-tools.mjs
+test-suite.mjs
+test-tools.mjs
+build-err.txt
+build-out.txt
