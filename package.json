@@ -4,11 +4,11 @@
   "description": "JIRA MCP Server",
   "type": "module",
   "scripts": {
-    "build": "vite build && chmod +x build/index.js",
-    "start": "bun build/index.js",
+    "build": "vite build",
+    "start": "node --env-file=.env build/index.js",
     "dev": "vite",
-    "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test": "node --test",
+    "test:watch": "node --test --watch"
   },
   "keywords": [
     "mcp",

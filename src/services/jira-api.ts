@@ -471,7 +471,7 @@ export class JiraApiService {
     filename: string
   ): Promise<{ id: string; filename: string }> {
     const formData = new FormData();
-    formData.append("file", new Blob([file]), filename);
+    formData.append("file", new Blob([file as BlobPart]), filename);
 
     const headers = new Headers(this.headers);
     headers.delete("Content-Type");
