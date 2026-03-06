@@ -2187,15 +2187,31 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 31. GET SPRINT KPI DATA
       case "quicktext-jira_get_sprint_kpi_data": {
         const { project_key, sprint_name, max_results = 1000 } = args;
-        
+
         let jql = `project = "${project_key}" AND sprint in openSprints()`;
         if (sprint_name) {
           jql = `project = "${project_key}" AND sprint = "${sprint_name}"`;
         }
-        
+
         const data = await jiraRequest(
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${max_results}&fields=*all`
         );
+
+        // Parse customfield_10302 (log work by roles) into {Developer, Tester, Reviewer} seconds map.
+        // Format is one "Role seconds (display)" entry per line, e.g. "Developer 43200 (1d 4h)".
+        const parseLogWorkByRoles = (cf10302: any): Record<string, number> | null => {
+          if (cf10302 === null || cf10302 === undefined) return null;
+          const raw = typeof cf10302 === "string" ? cf10302 : String(cf10302);
+          if (!raw.trim()) return null;
+          const result: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
+          for (const line of raw.split("\n")) {
+            const match = line.trim().match(/^(\w+)\s+(\d+)/);
+            if (match) {
+              result[match[1]] = parseInt(match[2], 10);
+            }
+          }
+          return result;
+        };
 
         return {
           content: [
@@ -2224,6 +2240,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   time_tracking_by_roles: parseTimeLoggedByRole(issue.fields.customfield_10300),
                   assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
                   sprints: parseSprints(issue.fields.customfield_10008),
+                  // --- NEW FIELDS ---
+                  tester: issue.fields.customfield_10018?.displayName ?? null,
+                  reviewed_by: issue.fields.customfield_10020?.displayName ?? null,
+                  log_work_by_roles: parseLogWorkByRoles(issue.fields.customfield_10302),
+                  created: issue.fields.created ?? null,
+                  qa_status: issue.fields.customfield_10901?.value ?? null,
+                  qa_validator: issue.fields.customfield_10900?.displayName ?? null,
                 })),
               }, null, 2),
             },
