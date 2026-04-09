@@ -21,9 +21,19 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 
-// Jira configuration
-const JIRA_BASE_URL = "https://jira.quicktext.im";
-const JIRA_PAT = "Mjk5MDg2ODMxNzQ0OvDfa+eg86eqrYNgn6DQIypIiC17";
+// Jira configuration — read from environment variables (set via .env or MCP client config)
+const JIRA_BASE_URL = process.env.JIRA_BASE_URL ?? '';
+const JIRA_PAT = process.env.JIRA_API_TOKEN ?? '';
+const JIRA_AUTH_TYPE = process.env.JIRA_AUTH_TYPE ?? 'bearer';
+const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL ?? '';
+
+if (!JIRA_BASE_URL || !JIRA_PAT) {
+  console.error('ERROR: Missing required environment variables.');
+  console.error('  JIRA_BASE_URL and JIRA_API_TOKEN must be set.');
+  console.error('  Copy .env.example to .env and fill in your values,');
+  console.error('  or set them in your MCP client configuration (claude_desktop_config.json).');
+  process.exit(1);
+}
 
 // Error codes (JIRA_1xxx-5xxx)
 const ErrorCodes = {
@@ -91,7 +101,9 @@ async function jiraRequest(endpoint, options = {}) {
     const response = await fetch(url, {
       ...options,
       headers: {
-        "Authorization": `Bearer ${JIRA_PAT}`,
+        "Authorization": JIRA_AUTH_TYPE === 'basic'
+          ? `Basic ${Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_PAT}`).toString('base64')}`
+          : `Bearer ${JIRA_PAT}`,
         "Content-Type": "application/json",
         "Accept": "application/json",
         ...options.headers,
@@ -139,15 +151,23 @@ async function jiraRequest(endpoint, options = {}) {
           "Wait before retrying. Check X-RateLimit-Reset header"
         );
       } else {
+        // Capture the raw error body for diagnosis
+        let errorBody: any = null;
+        try {
+          const errText = await response.text();
+          errorBody = errText ? JSON.parse(errText) : null;
+        } catch (_) { /* ignore parse errors */ }
         throw createError(
           ErrorCodes.JIRA_API_ERROR,
           `Jira API error: ${response.status} ${response.statusText}`,
-          { status: response.status, endpoint }
+          { status: response.status, endpoint, response_body: errorBody }
         );
       }
     }
 
-    return response.json();
+    // Handle empty responses (e.g. Jira 204 No Content on transitions)
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
   } catch (error) {
     if (error.error_code) {
       throw error; // Already a structured error
@@ -530,7 +550,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // 13. CREATE ISSUE
       {
         name: "quicktext-jira_create_issue",
-        description: "Create new Jira issue with summary, description, issue type, priority. Returns created issue key. Example: quicktext-jira_create_issue({project_key: 'QT', summary: 'Bug found', issue_type: 'Bug'})",
+        description: "Create new Jira issue with full field support. User fields (assignee, tester, reviewer) use Jira DC username (the 'name' field, e.g. 'osg', 'hga'). Example: quicktext-jira_create_issue({project_key: 'QT', summary: 'Bug found', issue_type: 'Bug', assignee: 'osg'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -548,22 +568,92 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             issue_type: {
               type: "string",
-              description: "Issue type (Bug, Task, Story, etc.)",
+              description: "Issue type (Bug, Task, Story, Sub-task, etc.)",
               default: "Task",
             },
             priority: {
               type: "string",
               description: "Priority (Highest, High, Medium, Low, Lowest)",
             },
+            assignee: {
+              type: "string",
+              description: "Assignee username (Jira DC 'name' field, e.g. 'osg', 'hga')",
+            },
+            labels: {
+              type: "array",
+              items: { type: "string" },
+              description: "Labels array (e.g. ['Hotfix'])",
+            },
+            time_estimate: {
+              type: "string",
+              description: "Time estimate in Jira format (e.g. '4h', '2d', '1w 2d 4h')",
+            },
+            reviewer_key: {
+              type: "string",
+              description: "Reviewer username — sets customfield_10020 (Reviewed By)",
+            },
+            tester_key: {
+              type: "string",
+              description: "Tester username — sets customfield_10018 (Tester)",
+            },
+            components: {
+              type: "array",
+              items: { type: "string" },
+              description: "Component names (e.g. ['Backend', 'Frontend'])",
+            },
+            fix_versions: {
+              type: "array",
+              items: { type: "string" },
+              description: "Fix version names (e.g. ['v2.1.0'])",
+            },
+            due_date: {
+              type: "string",
+              description: "Due date in YYYY-MM-DD format",
+            },
+            epic_link: {
+              type: "string",
+              description: "Epic issue key to link to (e.g. 'QT-1000')",
+            },
+            parent_key: {
+              type: "string",
+              description: "Parent issue key for sub-tasks (e.g. 'QT-1234')",
+            },
+            sprint_id: {
+              type: "number",
+              description: "Sprint ID to assign the issue to (use list_sprints to find IDs)",
+            },
+            story_points: {
+              type: "number",
+              description: "Story points estimate",
+            },
           },
-          required: ["project_key", "summary", "issue_type"],
+          required: ["project_key", "summary"],
         },
       },
       
       // 14. UPDATE ISSUE
       {
         name: "quicktext-jira_update_issue",
-        description: "Update existing issue fields (summary, description, assignee, priority, etc.). Returns updated issue. Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {summary: 'Updated title'}})",
+        description: `Update existing issue fields. Jira DC field formats:
+- assignee: {"name": "username"} (NOT accountId)
+- priority: {"name": "High"}
+- labels: ["label1", "label2"]
+- components: [{"name": "Backend"}]
+- fixVersions: [{"name": "v2.0"}]
+- duedate: "2026-12-31"
+- customfield_10018 (Tester): {"name": "username"}
+- customfield_10020 (Reviewed By): {"name": "username"}
+- customfield_10023 (Story point estimate): number
+- customfield_10012 (Story Points classic): number
+- customfield_10006 (Epic Link): "QT-1000"
+- customfield_10015 (Flagged): [{"value": "Impediment"}]
+- customfield_10901 (QA Status): {"value": "QA Pending"}
+- customfield_10900 (QA Validator): {"name": "username"}
+- timetracking: {"originalEstimate": "4h"} (auto-routed to update block)
+- timeOriginalEstimate: "4h" (shorthand, also auto-routed)
+- customfield_10901 (QA Status): {"id": "OPTION_ID"} (use option ID, not value name)
+For sprint assignment, use move_to_sprint tool instead.
+Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {name: 'osg'}}})`,
         inputSchema: {
           type: "object",
           properties: {
@@ -573,7 +663,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             fields: {
               type: "object",
-              description: "Fields to update (summary, description, assignee, priority, etc.)",
+              description: "Fields object — see tool description for Jira DC format reference",
             },
           },
           required: ["issue_key", "fields"],
@@ -684,7 +774,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // 20. GET CUSTOM FIELDS
       {
         name: "quicktext-jira_get_custom_fields",
-        description: "Discover all custom field IDs and names in QuickText Jira. Useful for understanding field mapping (customfield_10016 = Story Points, etc.). Example: quicktext-jira_get_custom_fields({})",
+        description: "Discover all custom field IDs and names in QuickText Jira. Useful for understanding field mapping (customfield_10023 = Story point estimate, etc.). Example: quicktext-jira_get_custom_fields({})",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1046,6 +1136,232 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["project_key"],
         },
       },
+      {
+        name: "quicktext-jira_get_mentions",
+        description: "Find all issues where a user was @mentioned in comments within a time window. Uses two-step approach: JQL candidate fetch + comment-level [~username] markup scan. Required because Jira DC 9.4 has no native JQL mention operator. Default window: last 2 weeks. Example: quicktext-jira_get_mentions({username_key: 'jam', project_key: 'QT', since: '-2w'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            username_key: {
+              type: "string",
+              description: "Jira username key used in @mentions, e.g. 'jam'. This is the key in [~jam] markup.",
+            },
+            project_key: {
+              type: "string",
+              description: "Project key to search within. Default: 'QT'",
+              default: "QT",
+            },
+            since: {
+              type: "string",
+              description: "Start of time window. ISO date 'YYYY-MM-DD' or relative '-Nd'/'-Nw' (e.g. '-2w', '-14d', '-30d'). Default: '-2w'",
+              default: "-2w",
+            },
+            until: {
+              type: "string",
+              description: "End of time window. ISO date 'YYYY-MM-DD'. Default: now (omit for current time)",
+            },
+          },
+          required: ["username_key"],
+        },
+      },
+
+      // 41. DELETE ISSUE
+      {
+        name: "quicktext-jira_delete_issue",
+        description: "Delete an issue from Jira. Use with caution — this is irreversible. Example: quicktext-jira_delete_issue({issue_key: 'QT-99999', delete_subtasks: true})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key to delete (e.g., 'QT-99999')",
+            },
+            delete_subtasks: {
+              type: "boolean",
+              description: "Also delete sub-tasks (default: false)",
+              default: false,
+            },
+          },
+          required: ["issue_key"],
+        },
+      },
+
+      // 42. MOVE TO SPRINT
+      {
+        name: "quicktext-jira_move_to_sprint",
+        description: "Move one or more issues to a sprint using the Agile API. Use list_sprints to find sprint IDs. Example: quicktext-jira_move_to_sprint({sprint_id: 308, issue_keys: ['QT-123', 'QT-456']})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sprint_id: {
+              type: "number",
+              description: "Target sprint ID (get from list_sprints)",
+            },
+            issue_keys: {
+              type: "array",
+              items: { type: "string" },
+              description: "Issue keys to move to the sprint",
+            },
+          },
+          required: ["sprint_id", "issue_keys"],
+        },
+      },
+
+      // 43. MOVE TO BACKLOG
+      {
+        name: "quicktext-jira_move_to_backlog",
+        description: "Move issues to the backlog (remove from any sprint). Example: quicktext-jira_move_to_backlog({issue_keys: ['QT-123']})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_keys: {
+              type: "array",
+              items: { type: "string" },
+              description: "Issue keys to move to backlog",
+            },
+          },
+          required: ["issue_keys"],
+        },
+      },
+
+      // 44. ADD ISSUE LINK
+      {
+        name: "quicktext-jira_add_issue_link",
+        description: "Create a link between two issues. Link types: 'Blocks' (outward: blocks / inward: is blocked by), 'Duplicate' (outward: duplicates / inward: is duplicated by), 'Relates' (relates to). Example: quicktext-jira_add_issue_link({link_type: 'Blocks', inward_issue: 'QT-100', outward_issue: 'QT-200'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            link_type: {
+              type: "string",
+              description: "Link type name (e.g. 'Blocks', 'Duplicate', 'Relates', 'Cloners')",
+            },
+            inward_issue: {
+              type: "string",
+              description: "Inward issue key (e.g. 'QT-100' — this issue 'is blocked by' the outward issue)",
+            },
+            outward_issue: {
+              type: "string",
+              description: "Outward issue key (e.g. 'QT-200' — this issue 'blocks' the inward issue)",
+            },
+            comment: {
+              type: "string",
+              description: "Optional comment to add with the link",
+            },
+          },
+          required: ["link_type", "inward_issue", "outward_issue"],
+        },
+      },
+
+      // 45. ADD WATCHER
+      {
+        name: "quicktext-jira_add_watcher",
+        description: "Add a user as watcher to an issue. Example: quicktext-jira_add_watcher({issue_key: 'QT-123', username: 'osg'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key",
+            },
+            username: {
+              type: "string",
+              description: "Username to add as watcher (Jira DC 'name' field)",
+            },
+          },
+          required: ["issue_key", "username"],
+        },
+      },
+
+      // 46. REMOVE WATCHER
+      {
+        name: "quicktext-jira_remove_watcher",
+        description: "Remove a user from watchers of an issue. Example: quicktext-jira_remove_watcher({issue_key: 'QT-123', username: 'osg'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key",
+            },
+            username: {
+              type: "string",
+              description: "Username to remove from watchers",
+            },
+          },
+          required: ["issue_key", "username"],
+        },
+      },
+
+      // 47. GET WATCHERS
+      {
+        name: "quicktext-jira_get_watchers",
+        description: "Get all watchers of an issue. Example: quicktext-jira_get_watchers({issue_key: 'QT-123'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key",
+            },
+          },
+          required: ["issue_key"],
+        },
+      },
+
+      // 48. GET ISSUE LINK TYPES
+      {
+        name: "quicktext-jira_get_link_types",
+        description: "Get all available issue link types (Blocks, Duplicate, Relates, etc.). Use before add_issue_link to find correct link type names.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+
+      // 49. ASSIGN ISSUE
+      {
+        name: "quicktext-jira_assign_issue",
+        description: "Assign an issue to a user using Jira DC's dedicated assignment endpoint. More reliable than update_issue for assignee changes. Use username=null to unassign. Example: quicktext-jira_assign_issue({issue_key: 'QT-123', username: 'osg'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key",
+            },
+            username: {
+              type: "string",
+              description: "Username to assign (Jira DC 'name' field). Pass null or omit to unassign.",
+            },
+          },
+          required: ["issue_key"],
+        },
+      },
+
+      // 50. RANK ISSUES
+      {
+        name: "quicktext-jira_rank_issues",
+        description: "Reorder issues in the backlog/sprint by ranking them before or after another issue. Example: quicktext-jira_rank_issues({issue_keys: ['QT-100'], rank_before: 'QT-200'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_keys: {
+              type: "array",
+              items: { type: "string" },
+              description: "Issue keys to reorder",
+            },
+            rank_before: {
+              type: "string",
+              description: "Place the issues before this issue key",
+            },
+            rank_after: {
+              type: "string",
+              description: "Place the issues after this issue key",
+            },
+          },
+          required: ["issue_keys"],
+        },
+      },
     ],
   };
 });
@@ -1097,7 +1413,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   })) || [],
                   labels: data.fields.labels || [],
                   components: data.fields.components?.map(c => c.name) || [],
-                  story_points: data.fields.customfield_10016,
+                  story_points: data.fields.customfield_10023,
                   time_estimate: data.fields.timeestimate,
                   time_logged: data.fields.timespent,
                   custom_fields: {
@@ -1157,7 +1473,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   updated: issue.fields.updated,
                   labels: issue.fields.labels || [],
                   components: issue.fields.components?.map(c => c.name) || [],
-                  story_points: issue.fields.customfield_10016,
+                  story_points: issue.fields.customfield_10023,
                   assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
                   sprints: parseSprints(issue.fields.customfield_10008),
                 })),
@@ -1590,16 +1906,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 13. CREATE ISSUE
       case "quicktext-jira_create_issue": {
-        const { project_key, summary, description, issue_type = "Task", priority } = args;
-        
+        const {
+          project_key, summary, description, issue_type = "Task", priority,
+          assignee, labels, time_estimate, reviewer_key, tester_key,
+          components, fix_versions, due_date, epic_link, parent_key,
+          sprint_id, story_points,
+          // Legacy support
+          time_estimate_seconds,
+        } = args;
+
         if (!summary) {
-          throw createError(
-            ErrorCodes.MISSING_REQUIRED_FIELD,
-            "summary is required"
-          );
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "summary is required");
         }
 
-        const payload = {
+        const createPayload: any = {
           fields: {
             project: { key: project_key },
             summary,
@@ -1608,34 +1928,125 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
         };
 
-        if (priority) {
-          payload.fields.priority = { name: priority };
+        // Fields that can be set at creation time
+        if (priority) createPayload.fields.priority = { name: priority };
+        if (due_date) createPayload.fields.duedate = due_date;
+        if (components && components.length > 0) {
+          createPayload.fields.components = components.map((c: string) => ({ name: c }));
         }
+        if (fix_versions && fix_versions.length > 0) {
+          createPayload.fields.fixVersions = fix_versions.map((v: string) => ({ name: v }));
+        }
+        if (parent_key) createPayload.fields.parent = { key: parent_key };
 
         const data = await jiraRequest("/rest/api/2/issue", {
           method: "POST",
-          body: JSON.stringify(payload),
+          body: JSON.stringify(createPayload),
         });
 
+        const issueKey = data.key;
+        const issueUrl = `${JIRA_BASE_URL}/browse/${issueKey}`;
+        const appliedFields: string[] = ["project", "summary", "issuetype"];
+        const warnings: Array<{ field: string; reason: string; raw_error?: any }> = [];
+
+        if (priority) appliedFields.push("priority");
+        if (due_date) appliedFields.push("duedate");
+        if (components && components.length > 0) appliedFields.push("components");
+        if (fix_versions && fix_versions.length > 0) appliedFields.push("fixVersions");
+        if (parent_key) appliedFields.push("parent");
+
+        // Post-creation field updates (batched where possible)
+        const postCreateFields: any = {};
+        if (assignee) postCreateFields.assignee = { name: assignee };
+        if (labels && labels.length > 0) postCreateFields.labels = labels;
+        if (reviewer_key) postCreateFields.customfield_10020 = { name: reviewer_key };
+        if (tester_key) postCreateFields.customfield_10018 = { name: tester_key };
+        if (story_points !== undefined) postCreateFields.customfield_10023 = story_points;
+        if (epic_link) postCreateFields.customfield_10006 = epic_link;
+
+        // Time estimate: must be sent via update block (not fields block)
+        const timeEstStr = time_estimate || (time_estimate_seconds ? `${time_estimate_seconds}s` : null);
+        let postCreateUpdateBlock: any = {};
+        if (timeEstStr) {
+          postCreateUpdateBlock.timetracking = [{ set: { originalEstimate: timeEstStr } }];
+        }
+
+        if (Object.keys(postCreateFields).length > 0 || Object.keys(postCreateUpdateBlock).length > 0) {
+          const postPayload: any = {};
+          if (Object.keys(postCreateFields).length > 0) postPayload.fields = postCreateFields;
+          if (Object.keys(postCreateUpdateBlock).length > 0) postPayload.update = postCreateUpdateBlock;
+
+          try {
+            await jiraRequest(`/rest/api/2/issue/${issueKey}`, {
+              method: "PUT",
+              body: JSON.stringify(postPayload),
+            });
+            appliedFields.push(...Object.keys(postCreateFields));
+            if (postCreateUpdateBlock.timetracking) appliedFields.push("timetracking");
+          } catch (batchErr: any) {
+            // If batch fails, try each field individually
+            for (const [fieldName, fieldValue] of Object.entries(postCreateFields)) {
+              try {
+                await jiraRequest(`/rest/api/2/issue/${issueKey}`, {
+                  method: "PUT",
+                  body: JSON.stringify({ fields: { [fieldName]: fieldValue } }),
+                });
+                appliedFields.push(fieldName);
+              } catch (fieldErr: any) {
+                let rawErr = fieldErr.error_message || fieldErr.message || String(fieldErr);
+                if (fieldErr.details) rawErr = fieldErr.details;
+                warnings.push({ field: fieldName, reason: rawErr, raw_error: fieldErr });
+              }
+            }
+            // Try timetracking separately via update block
+            if (postCreateUpdateBlock.timetracking) {
+              try {
+                await jiraRequest(`/rest/api/2/issue/${issueKey}`, {
+                  method: "PUT",
+                  body: JSON.stringify({ update: postCreateUpdateBlock }),
+                });
+                appliedFields.push("timetracking");
+              } catch (ttErr: any) {
+                warnings.push({ field: "timetracking", reason: ttErr.error_message || ttErr.message || String(ttErr) });
+              }
+            }
+          }
+        }
+
+        // Sprint assignment via Agile API (cannot be done via regular field update)
+        if (sprint_id) {
+          try {
+            await jiraRequest(`/rest/agile/1.0/sprint/${sprint_id}/issue`, {
+              method: "POST",
+              body: JSON.stringify({ issues: [issueKey] }),
+            });
+            appliedFields.push("sprint");
+          } catch (e: any) {
+            warnings.push({ field: "sprint", reason: e.error_message || e.message || String(e) });
+          }
+        }
+
+        const createResult: any = {
+          success: true,
+          issue_key: issueKey,
+          issue_id: data.id,
+          issue_url: issueUrl,
+          self: data.self,
+          applied_fields: appliedFields,
+        };
+        if (warnings.length > 0) {
+          createResult.warnings = warnings;
+        }
+
         return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                success: true,
-                issue_key: data.key,
-                issue_id: data.id,
-                self: data.self,
-              }, null, 2),
-            },
-          ],
+          content: [{ type: "text", text: JSON.stringify(createResult, null, 2) }],
         };
       }
 
       // 14. UPDATE ISSUE
       case "quicktext-jira_update_issue": {
         const { issue_key, fields } = args;
-        
+
         if (!fields || Object.keys(fields).length === 0) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
@@ -1643,23 +2054,96 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        await jiraRequest(`/rest/api/2/issue/${issue_key}`, {
-          method: "PUT",
-          body: JSON.stringify({ fields }),
-        });
+        // Separate timetracking from regular fields — it must go in the "update" block
+        const regularFields: any = {};
+        const updateBlock: any = {};
+        for (const [k, v] of Object.entries(fields)) {
+          if (k === "timetracking") {
+            updateBlock.timetracking = [{ set: v }];
+          } else if (k === "timeOriginalEstimate" || k === "timeoriginalestimate") {
+            // Convenience: accept timeOriginalEstimate as a shorthand
+            updateBlock.timetracking = [{ set: { originalEstimate: v } }];
+          } else {
+            regularFields[k] = v;
+          }
+        }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                success: true,
-                message: `Issue ${issue_key} updated successfully`,
-                updated_fields: Object.keys(fields),
-              }, null, 2),
-            },
-          ],
-        };
+        const putPayload: any = {};
+        if (Object.keys(regularFields).length > 0) putPayload.fields = regularFields;
+        if (Object.keys(updateBlock).length > 0) putPayload.update = updateBlock;
+
+        // Try batch update first
+        try {
+          await jiraRequest(`/rest/api/2/issue/${issue_key}`, {
+            method: "PUT",
+            body: JSON.stringify(putPayload),
+          });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  success: true,
+                  message: `Issue ${issue_key} updated successfully`,
+                  updated_fields: Object.keys(fields),
+                }, null, 2),
+              },
+            ],
+          };
+        } catch (batchErr: any) {
+          // If batch fails and we have multiple fields, try each individually
+          if (Object.keys(fields).length > 1) {
+            const succeeded: string[] = [];
+            const failed: Array<{ field: string; reason: any }> = [];
+
+            for (const [fieldName, fieldValue] of Object.entries(fields)) {
+              try {
+                let singlePayload: any;
+                if (fieldName === "timetracking") {
+                  singlePayload = { update: { timetracking: [{ set: fieldValue }] } };
+                } else if (fieldName === "timeOriginalEstimate" || fieldName === "timeoriginalestimate") {
+                  singlePayload = { update: { timetracking: [{ set: { originalEstimate: fieldValue } }] } };
+                } else {
+                  singlePayload = { fields: { [fieldName]: fieldValue } };
+                }
+                await jiraRequest(`/rest/api/2/issue/${issue_key}`, {
+                  method: "PUT",
+                  body: JSON.stringify(singlePayload),
+                });
+                succeeded.push(fieldName);
+              } catch (fieldErr: any) {
+                failed.push({
+                  field: fieldName,
+                  reason: fieldErr.details || fieldErr.error_message || fieldErr.message || String(fieldErr),
+                });
+              }
+            }
+
+            if (succeeded.length > 0) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      partial_success: true,
+                      message: `Issue ${issue_key} partially updated`,
+                      updated_fields: succeeded,
+                      failed_fields: failed,
+                    }, null, 2),
+                  },
+                ],
+              };
+            }
+            // All individual attempts failed — report all errors
+            throw createError(
+              ErrorCodes.JIRA_API_ERROR,
+              `All field updates failed for ${issue_key}`,
+              { failed_fields: failed, batch_error: batchErr.details || batchErr.error_message || batchErr.message }
+            );
+          }
+          throw batchErr;
+        }
       }
 
       // 15. TRANSITION ISSUE
@@ -1729,7 +2213,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 17. ADD ATTACHMENT
       case "quicktext-jira_add_attachment": {
         const { issue_key, filename, content_base64 } = args;
-        
+
         if (!filename || !content_base64) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
@@ -1737,16 +2221,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const buffer = Buffer.from(content_base64, "base64");
-        
-        const data = await jiraRequest(`/rest/api/2/issue/${issue_key}/attachments`, {
+        const fileBuffer = Buffer.from(content_base64, "base64");
+
+        // Build proper multipart/form-data manually (Jira DC requires field name "file")
+        const boundary = `----JiraMCPBoundary${Date.now()}`;
+        const CRLF = "\r\n";
+        const multipartParts = [
+          `--${boundary}${CRLF}`,
+          `Content-Disposition: form-data; name="file"; filename="${filename}"${CRLF}`,
+          `Content-Type: application/octet-stream${CRLF}`,
+          CRLF,
+        ];
+        const headerBuf = Buffer.from(multipartParts.join(""), "utf-8");
+        const footerBuf = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf-8");
+        const multipartBody = Buffer.concat([headerBuf, fileBuffer, footerBuf]);
+
+        const attachUrl = `${JIRA_BASE_URL}/rest/api/2/issue/${issue_key}/attachments`;
+        const attachResp = await fetch(attachUrl, {
           method: "POST",
           headers: {
+            "Authorization": JIRA_AUTH_TYPE === 'basic'
+              ? `Basic ${Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_PAT}`).toString('base64')}`
+              : `Bearer ${JIRA_PAT}`,
             "X-Atlassian-Token": "no-check",
-            "Content-Type": "multipart/form-data",
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
           },
-          body: buffer,
+          body: multipartBody,
         });
+
+        if (!attachResp.ok) {
+          const errText = await attachResp.text();
+          throw createError(
+            ErrorCodes.JIRA_API_ERROR,
+            `Attachment upload failed: ${attachResp.status}`,
+            { status: attachResp.status, response: errText }
+          );
+        }
+
+        const attachData = await attachResp.json();
 
         return {
           content: [
@@ -1755,6 +2267,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 message: `Attachment ${filename} added to ${issue_key}`,
+                attachments: Array.isArray(attachData) ? attachData.map((a: any) => ({
+                  id: a.id,
+                  filename: a.filename,
+                  size: a.size,
+                  mimeType: a.mimeType,
+                  content: a.content,
+                })) : attachData,
               }, null, 2),
             },
           ],
@@ -1767,7 +2286,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const jql = `"Epic Link" = ${epic_key}`;
         const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${max_results}&fields=summary,status,assignee,customfield_10016`
+          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${max_results}&fields=summary,status,assignee,customfield_10023`
         );
 
         return {
@@ -1783,7 +2302,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
                   assignee: issue.fields.assignee?.displayName || "Unassigned",
-                  story_points: issue.fields.customfield_10016,
+                  story_points: issue.fields.customfield_10023,
                 })),
               }, null, 2),
             },
@@ -2230,7 +2749,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   reporter: issue.fields.reporter?.displayName,
                   labels: issue.fields.labels || [],
                   issue_type: issue.fields.issuetype?.name,
-                  story_points: issue.fields.customfield_10016,
+                  story_points: issue.fields.customfield_10023,
                   time_estimate_seconds: issue.fields.timeestimate,        // DEPRECATED — use time_remaining_seconds
                   time_remaining_seconds: issue.fields.timeestimate,       // Correct name (remaining estimate)
                   time_original_estimate_seconds: issue.fields.timeoriginalestimate,  // Original estimate (never changes)
@@ -2772,6 +3291,291 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               issues: issueResults,
             }, null, 2),
           }],
+        };
+      }
+
+      // 40. GET MENTIONS
+      case "quicktext-jira_get_mentions": {
+        const username_key = args.username_key;
+        if (!username_key) {
+          throw createError(
+            ErrorCodes.MISSING_REQUIRED_FIELD,
+            "username_key is required",
+            { provided_args: args },
+            "Provide username_key parameter (e.g., 'jam')"
+          );
+        }
+        const project_key = args.project_key ?? "QT";
+        const sinceRaw = args.since ?? "-2w";
+        const untilRaw = args.until ?? null;
+
+        // Parse since
+        let sinceDate: Date;
+        const relMatch = sinceRaw.match(/^-(\d+)(d|w)$/);
+        if (relMatch) {
+          const n = parseInt(relMatch[1], 10);
+          const unit = relMatch[2];
+          sinceDate = new Date();
+          sinceDate.setDate(sinceDate.getDate() - (unit === "w" ? n * 7 : n));
+        } else {
+          sinceDate = new Date(sinceRaw);
+        }
+
+        // Parse until
+        const untilDate = untilRaw ? new Date(untilRaw) : new Date();
+
+        // Format sinceDate for JQL as YYYY-MM-DD
+        const sinceJQL = sinceDate.toISOString().slice(0, 10);
+
+        // Step 1: Paginate through JQL results
+        const jql = `project = "${project_key}" AND updated >= "${sinceJQL}" ORDER BY updated DESC`;
+        const issueKeys: { key: string; summary: string; status: string }[] = [];
+        let startAt = 0;
+        const pageSize = 100;
+        let total = 0;
+
+        do {
+          const searchData = await jiraRequest(
+            `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${pageSize}&startAt=${startAt}&fields=key,summary,status`
+          );
+          total = searchData.total;
+          for (const issue of searchData.issues) {
+            issueKeys.push({
+              key: issue.key,
+              summary: issue.fields.summary,
+              status: issue.fields.status?.name || "Unknown",
+            });
+          }
+          startAt += pageSize;
+        } while (startAt < total);
+
+        // Step 2: For each issue, fetch comments and scan for [~username_key]
+        const mentionPattern = `[~${username_key}]`;
+        const results: any[] = [];
+
+        await asyncPool(5, issueKeys, async (issue) => {
+          const commentData = await jiraRequest(
+            `/rest/api/2/issue/${issue.key}/comment?maxResults=500`
+          );
+          for (const comment of commentData.comments || []) {
+            const commentDate = new Date(comment.created);
+            if (
+              commentDate >= sinceDate &&
+              commentDate <= untilDate &&
+              comment.body && comment.body.includes(mentionPattern)
+            ) {
+              results.push({
+                issue_key: issue.key,
+                issue_summary: issue.summary,
+                issue_status: issue.status,
+                comment_author: comment.author?.displayName || comment.author?.name || "Unknown",
+                comment_created: comment.created,
+                comment_body: comment.body.slice(0, 300),
+              });
+            }
+          }
+        });
+
+        // Sort by comment_created DESC
+        results.sort((a, b) => new Date(b.comment_created).getTime() - new Date(a.comment_created).getTime());
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              username_key,
+              project_key,
+              since: sinceDate.toISOString(),
+              until: untilDate.toISOString(),
+              total_issues_scanned: issueKeys.length,
+              total_mentions_found: results.length,
+              mentions: results,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 41. DELETE ISSUE
+      case "quicktext-jira_delete_issue": {
+        const { issue_key, delete_subtasks = false } = args;
+        const deleteUrl = `/rest/api/2/issue/${issue_key}?deleteSubtasks=${delete_subtasks}`;
+        await jiraRequest(deleteUrl, { method: "DELETE" });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Issue ${issue_key} deleted${delete_subtasks ? ' (with sub-tasks)' : ''}`,
+          }, null, 2) }],
+        };
+      }
+
+      // 42. MOVE TO SPRINT
+      case "quicktext-jira_move_to_sprint": {
+        const { sprint_id, issue_keys } = args;
+        if (!issue_keys || issue_keys.length === 0) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
+        }
+        await jiraRequest(`/rest/agile/1.0/sprint/${sprint_id}/issue`, {
+          method: "POST",
+          body: JSON.stringify({ issues: issue_keys }),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Moved ${issue_keys.length} issue(s) to sprint ${sprint_id}`,
+            issues: issue_keys,
+            sprint_id,
+          }, null, 2) }],
+        };
+      }
+
+      // 43. MOVE TO BACKLOG
+      case "quicktext-jira_move_to_backlog": {
+        const { issue_keys: backlogIssues } = args;
+        if (!backlogIssues || backlogIssues.length === 0) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
+        }
+        await jiraRequest(`/rest/agile/1.0/backlog/issue`, {
+          method: "POST",
+          body: JSON.stringify({ issues: backlogIssues }),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Moved ${backlogIssues.length} issue(s) to backlog`,
+            issues: backlogIssues,
+          }, null, 2) }],
+        };
+      }
+
+      // 44. ADD ISSUE LINK
+      case "quicktext-jira_add_issue_link": {
+        const { link_type, inward_issue, outward_issue, comment: linkComment } = args;
+        const linkPayload: any = {
+          type: { name: link_type },
+          inwardIssue: { key: inward_issue },
+          outwardIssue: { key: outward_issue },
+        };
+        if (linkComment) {
+          linkPayload.comment = { body: linkComment };
+        }
+        await jiraRequest(`/rest/api/2/issueLink`, {
+          method: "POST",
+          body: JSON.stringify(linkPayload),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Link created: ${outward_issue} ${link_type} ${inward_issue}`,
+          }, null, 2) }],
+        };
+      }
+
+      // 45. ADD WATCHER
+      case "quicktext-jira_add_watcher": {
+        const { issue_key: watchIssue, username: watchUser } = args;
+        // Jira DC expects the username as a plain JSON string in the body
+        await jiraRequest(`/rest/api/2/issue/${watchIssue}/watchers`, {
+          method: "POST",
+          body: JSON.stringify(watchUser),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Added ${watchUser} as watcher on ${watchIssue}`,
+          }, null, 2) }],
+        };
+      }
+
+      // 46. REMOVE WATCHER
+      case "quicktext-jira_remove_watcher": {
+        const { issue_key: unwatchIssue, username: unwatchUser } = args;
+        await jiraRequest(`/rest/api/2/issue/${unwatchIssue}/watchers?username=${encodeURIComponent(unwatchUser)}`, {
+          method: "DELETE",
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Removed ${unwatchUser} from watchers on ${unwatchIssue}`,
+          }, null, 2) }],
+        };
+      }
+
+      // 47. GET WATCHERS
+      case "quicktext-jira_get_watchers": {
+        const { issue_key: watchersIssue } = args;
+        const watchersData = await jiraRequest(`/rest/api/2/issue/${watchersIssue}/watchers`);
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            issue_key: watchersIssue,
+            watcher_count: watchersData.watchCount,
+            is_watching: watchersData.isWatching,
+            watchers: (watchersData.watchers || []).map((w: any) => ({
+              name: w.name,
+              displayName: w.displayName,
+              key: w.key,
+            })),
+          }, null, 2) }],
+        };
+      }
+
+      // 48. GET ISSUE LINK TYPES
+      case "quicktext-jira_get_link_types": {
+        const linkTypesData = await jiraRequest(`/rest/api/2/issueLinkType`);
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            link_types: (linkTypesData.issueLinkTypes || []).map((lt: any) => ({
+              id: lt.id,
+              name: lt.name,
+              inward: lt.inward,
+              outward: lt.outward,
+            })),
+          }, null, 2) }],
+        };
+      }
+
+      // 49. ASSIGN ISSUE (dedicated endpoint)
+      case "quicktext-jira_assign_issue": {
+        const { issue_key: assignIssue, username: assignUser } = args;
+        // Use the dedicated assign endpoint — more reliable than PUT /fields/assignee on DC
+        await jiraRequest(`/rest/api/2/issue/${assignIssue}/assignee`, {
+          method: "PUT",
+          body: JSON.stringify({ name: assignUser || null }),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: assignUser
+              ? `Issue ${assignIssue} assigned to ${assignUser}`
+              : `Issue ${assignIssue} unassigned`,
+          }, null, 2) }],
+        };
+      }
+
+      // 50. RANK ISSUES
+      case "quicktext-jira_rank_issues": {
+        const { issue_keys: rankIssues, rank_before, rank_after } = args;
+        if (!rankIssues || rankIssues.length === 0) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
+        }
+        if (!rank_before && !rank_after) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "Either rank_before or rank_after is required");
+        }
+        const rankPayload: any = { issues: rankIssues };
+        if (rank_before) rankPayload.rankBeforeIssue = rank_before;
+        if (rank_after) rankPayload.rankAfterIssue = rank_after;
+        await jiraRequest(`/rest/agile/1.0/issue/rank`, {
+          method: "PUT",
+          body: JSON.stringify(rankPayload),
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            message: `Ranked ${rankIssues.length} issue(s) ${rank_before ? 'before ' + rank_before : 'after ' + rank_after}`,
+            issues: rankIssues,
+          }, null, 2) }],
         };
       }
 
