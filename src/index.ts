@@ -626,6 +626,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Story points estimate",
             },
+            epic_name: {
+              type: "string",
+              description: "Epic name (required when issue_type is 'Epic'). Maps to customfield_10003.",
+            },
           },
           required: ["project_key", "summary"],
         },
@@ -1910,7 +1914,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           project_key, summary, description, issue_type = "Task", priority,
           assignee, labels, time_estimate, reviewer_key, tester_key,
           components, fix_versions, due_date, epic_link, parent_key,
-          sprint_id, story_points,
+          sprint_id, story_points, epic_name,
           // Legacy support
           time_estimate_seconds,
         } = args;
@@ -1938,6 +1942,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           createPayload.fields.fixVersions = fix_versions.map((v: string) => ({ name: v }));
         }
         if (parent_key) createPayload.fields.parent = { key: parent_key };
+        if (epic_name) createPayload.fields.customfield_10003 = epic_name;
 
         const data = await jiraRequest("/rest/api/2/issue", {
           method: "POST",
