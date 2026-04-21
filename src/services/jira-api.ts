@@ -241,7 +241,9 @@ export class JiraApiService {
       await this.handleFetchError(response, url);
     }
 
-    return response.json();
+    // Handle empty responses (e.g. Jira 204 No Content on transitions)
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
   }
 
   async searchIssues(searchString: string): Promise<SearchIssuesResponse> {
