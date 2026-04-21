@@ -8,7 +8,7 @@
  * ✅ Vendor Prefix: All tools use quicktext-jira_ prefix (underscore, not slash)
  * ✅ Enhanced Descriptions: Comprehensive tool documentation with examples
  * ✅ Structured Errors: Machine-readable error codes (JIRA_1xxx-5xxx)
- * ✅ Tool Count: 34 tools (31 core + 3 Discovery Suite)
+ * ✅ Tool Count: 53 tools (50 core + 3 Attachment Suite)
  * ✅ Structured Outputs: JSON schemas with validation
  * ✅ Jira Agile API: Uses /rest/agile/1.0/ for board/sprint discovery
  * ✅ Data Center Compatible: Tested on Jira v9.4.5
@@ -73,7 +73,7 @@ let rateLimitInfo = {
 const server = new Server(
   {
     name: "jira-enhanced-quicktext",
-    version: "4.6.0",
+    version: "4.7.0",
   },
   {
     capabilities: {
@@ -180,6 +180,57 @@ async function jiraRequest(endpoint, options = {}) {
       "Check network connectivity and Jira server status"
     );
   }
+}
+
+// Helper: Fetch a binary URL (attachment content) with PAT auth
+// Returns a Buffer and the Content-Type reported by Jira.
+// Throws a structured error if the response is not OK or exceeds maxBytes.
+async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ buffer: Buffer; contentType: string }> {
+  const authHeader = JIRA_AUTH_TYPE === 'basic'
+    ? `Basic ${Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_PAT}`).toString('base64')}`
+    : `Bearer ${JIRA_PAT}`;
+
+  const response = await fetch(url, {
+    headers: { Authorization: authHeader },
+  });
+
+  if (!response.ok) {
+    throw createError(
+      ErrorCodes.JIRA_API_ERROR,
+      `Failed to fetch attachment: HTTP ${response.status}`,
+      { status: response.status },
+      "Verify the attachment ID is correct and you have permission to view this issue"
+    );
+  }
+
+  const contentType = response.headers.get("Content-Type") || "application/octet-stream";
+
+  // Honour Content-Length as an early guard before buffering
+  const contentLength = response.headers.get("Content-Length");
+  if (contentLength && parseInt(contentLength) > maxBytes) {
+    const sizeMb = (parseInt(contentLength) / 1024 / 1024).toFixed(2);
+    const maxMb = (maxBytes / 1024 / 1024).toFixed(0);
+    throw createError(
+      ErrorCodes.INVALID_PARAMETER,
+      `File too large to download (${sizeMb} MB). Increase max_size_mb (current: ${maxMb}).`,
+      { size_bytes: parseInt(contentLength), max_bytes: maxBytes }
+    );
+  }
+
+  const arrayBuffer = await response.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  if (buffer.length > maxBytes) {
+    const sizeMb = (buffer.length / 1024 / 1024).toFixed(2);
+    const maxMb = (maxBytes / 1024 / 1024).toFixed(0);
+    throw createError(
+      ErrorCodes.INVALID_PARAMETER,
+      `File too large to download (${sizeMb} MB). Increase max_size_mb (current: ${maxMb}).`,
+      { size_bytes: buffer.length, max_bytes: maxBytes }
+    );
+  }
+
+  return { buffer, contentType };
 }
 
 // Helper: Parse time logged by role from customfield_10300
@@ -1364,6 +1415,69 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             },
           },
           required: ["issue_keys"],
+        },
+      },
+
+      // 51. LIST ATTACHMENTS
+      {
+        name: "quicktext-jira_list_attachments",
+        description: "List all attachments on a Jira issue with metadata (id, filename, mime_type, size_bytes, download URL, thumbnail URL). Returns empty array when the issue has no attachments. Example: quicktext-jira_list_attachments({issue_key: 'QT-15415'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key (e.g., 'QT-15415')",
+            },
+          },
+          required: ["issue_key"],
+        },
+      },
+
+      // 52. GET ATTACHMENT
+      {
+        name: "quicktext-jira_get_attachment",
+        description: "Download a specific attachment by its ID. Images (PNG/JPEG/GIF/WEBP) are returned as native MCP image blocks so Claude can see them directly. Small text files are returned as decoded text. PDFs and other binaries are returned as base64 in a text block. Example: quicktext-jira_get_attachment({attachment_id: '202820'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            attachment_id: {
+              type: "string",
+              description: "Attachment ID from quicktext-jira_list_attachments (e.g., '202820')",
+            },
+            max_size_mb: {
+              type: "number",
+              description: "Maximum file size to download in MB (default: 10)",
+              default: 10,
+            },
+          },
+          required: ["attachment_id"],
+        },
+      },
+
+      // 53. GET ISSUE ATTACHMENTS BULK
+      {
+        name: "quicktext-jira_get_issue_attachments_bulk",
+        description: "Download all image attachments from an issue in one call (up to 5 images). Returns native MCP image blocks so Claude can see the images directly. Ideal for viewing all visual specs on a ticket. Example: quicktext-jira_get_issue_attachments_bulk({issue_key: 'QT-15415'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_key: {
+              type: "string",
+              description: "Issue key (e.g., 'QT-15415')",
+            },
+            max_size_mb: {
+              type: "number",
+              description: "Max size per image in MB (default: 10)",
+              default: 10,
+            },
+            max_images: {
+              type: "number",
+              description: "Maximum number of images to download (default: 5, hard cap: 5)",
+              default: 5,
+            },
+          },
+          required: ["issue_key"],
         },
       },
     ],
@@ -3582,6 +3696,176 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             issues: rankIssues,
           }, null, 2) }],
         };
+      }
+
+      // 51. LIST ATTACHMENTS
+      case "quicktext-jira_list_attachments": {
+        const { issue_key: listAttIssueKey } = args;
+        if (!listAttIssueKey) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required");
+        }
+        const listAttData = await jiraRequest(`/rest/api/2/issue/${listAttIssueKey}?fields=attachment`);
+        const rawAttachments = listAttData.fields?.attachment || [];
+        const attachments = rawAttachments.map((a: any) => ({
+          id: a.id,
+          filename: a.filename,
+          mime_type: a.mimeType,
+          size_bytes: a.size,
+          author: a.author?.displayName || a.author?.name || "Unknown",
+          created: a.created,
+          content_url: a.content,
+          thumbnail_url: a.thumbnail || null,
+        }));
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            issue_key: listAttIssueKey,
+            total: attachments.length,
+            attachments,
+          }, null, 2) }],
+        };
+      }
+
+      // 52. GET ATTACHMENT
+      case "quicktext-jira_get_attachment": {
+        const { attachment_id, max_size_mb = 10 } = args;
+        if (!attachment_id) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "attachment_id is required");
+        }
+        const maxBytes = (max_size_mb || 10) * 1024 * 1024;
+
+        // Fetch metadata via standard Jira REST (returns JSON)
+        const meta = await jiraRequest(`/rest/api/2/attachment/${attachment_id}`);
+        const filename: string = meta.filename || "unknown";
+        const mimeType: string = (meta.mimeType || "application/octet-stream").split(";")[0].trim();
+        const sizeBytes: number = meta.size || 0;
+        const contentUrl: string = meta.content;
+
+        // Early size guard (before network download)
+        if (sizeBytes > maxBytes) {
+          throw createError(
+            ErrorCodes.INVALID_PARAMETER,
+            `File too large to download (${(sizeBytes / 1024 / 1024).toFixed(2)} MB). Increase max_size_mb (current: ${max_size_mb}).`,
+            { size_bytes: sizeBytes, max_bytes: maxBytes, filename }
+          );
+        }
+
+        const { buffer } = await fetchAttachmentBinary(contentUrl, maxBytes);
+
+        const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+        const TEXT_MIME_PREFIXES = ["text/"];
+        const TEXT_MIME_EXACT = ["application/json", "application/xml"];
+        const TEXT_SIZE_LIMIT = 500 * 1024;
+
+        const isImage = IMAGE_MIME_TYPES.includes(mimeType);
+        const isText = (TEXT_MIME_PREFIXES.some(p => mimeType.startsWith(p)) || TEXT_MIME_EXACT.includes(mimeType))
+          && buffer.length <= TEXT_SIZE_LIMIT;
+
+        const metaLabel = `Attachment ${attachment_id}: ${filename} (${mimeType}, ${buffer.length} bytes)`;
+
+        if (isImage) {
+          // Return native MCP image block — Claude renders this directly
+          return {
+            content: [
+              {
+                type: "image",
+                data: buffer.toString("base64"),
+                mimeType,
+              },
+              {
+                type: "text",
+                text: metaLabel,
+              },
+            ],
+          };
+        } else if (isText) {
+          return {
+            content: [{ type: "text", text: `${metaLabel}\n\n${buffer.toString("utf-8")}` }],
+          };
+        } else {
+          // PDF and other binaries — base64 in a text block
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              success: true,
+              attachment_id,
+              filename,
+              mime_type: mimeType,
+              size_bytes: buffer.length,
+              encoding: "base64",
+              note: "Binary file returned as base64. Decode to access raw content.",
+              data: buffer.toString("base64"),
+            }, null, 2) }],
+          };
+        }
+      }
+
+      // 53. GET ISSUE ATTACHMENTS BULK
+      case "quicktext-jira_get_issue_attachments_bulk": {
+        const { issue_key: bulkIssueKey, max_size_mb: bulkMaxMb = 10, max_images = 5 } = args;
+        if (!bulkIssueKey) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required");
+        }
+        const bulkMaxBytes = (bulkMaxMb || 10) * 1024 * 1024;
+        const imageLimit = Math.min(max_images || 5, 5);
+        const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+
+        const bulkData = await jiraRequest(`/rest/api/2/issue/${bulkIssueKey}?fields=attachment`);
+        const allAttachments = bulkData.fields?.attachment || [];
+        const imageAttachments = allAttachments
+          .filter((a: any) => IMAGE_MIME_TYPES.includes((a.mimeType || "").split(";")[0].trim()))
+          .slice(0, imageLimit);
+
+        if (imageAttachments.length === 0) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({
+              success: true,
+              issue_key: bulkIssueKey,
+              message: "No image attachments found on this issue.",
+              total_attachments: allAttachments.length,
+              image_attachments_found: 0,
+            }, null, 2) }],
+          };
+        }
+
+        const contentBlocks: any[] = [];
+        const errors: any[] = [];
+
+        // Summary text block first so context is clear
+        contentBlocks.push({
+          type: "text",
+          text: `Issue ${bulkIssueKey}: downloading ${imageAttachments.length} image attachment(s) ` +
+            `(${allAttachments.length} total attachment(s))\n` +
+            imageAttachments.map((a: any, i: number) =>
+              `  ${i + 1}. ${a.filename} (${a.mimeType}, ${a.size} bytes, ID: ${a.id})`
+            ).join("\n"),
+        });
+
+        for (const att of imageAttachments) {
+          const mimeType: string = (att.mimeType || "image/png").split(";")[0].trim();
+          if (att.size > bulkMaxBytes) {
+            errors.push({ id: att.id, filename: att.filename, reason: `Too large (${(att.size / 1024 / 1024).toFixed(2)} MB > ${bulkMaxMb} MB)` });
+            continue;
+          }
+          try {
+            const { buffer } = await fetchAttachmentBinary(att.content, bulkMaxBytes);
+            contentBlocks.push({
+              type: "image",
+              data: buffer.toString("base64"),
+              mimeType,
+            });
+          } catch (dlErr: any) {
+            errors.push({ id: att.id, filename: att.filename, reason: dlErr.error_message || dlErr.message || "Download failed" });
+          }
+        }
+
+        if (errors.length > 0) {
+          contentBlocks.push({
+            type: "text",
+            text: `Skipped ${errors.length} attachment(s):\n${JSON.stringify(errors, null, 2)}`,
+          });
+        }
+
+        return { content: contentBlocks };
       }
 
       default:
