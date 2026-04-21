@@ -1933,7 +1933,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               statusTimes[currentStatus].total_ms += duration;
               statusTimes[currentStatus].count++;
 
-              currentStatus = statusChange.to;
+              currentStatus = statusChange.toString;
               currentTime = changeTime;
             }
           });
