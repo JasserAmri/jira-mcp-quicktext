@@ -412,7 +412,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Optional: specific sprint name. If omitted, searches open sprints",
             },
             max_results: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum results to return (default: 500)",
               default: 500,
             },
@@ -467,7 +467,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "JQL query string (e.g., 'project = QT AND assignee = currentUser()')",
             },
             max_results: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum results (default: 100)",
               default: 100,
             },
@@ -590,7 +590,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               default: "QT",
             },
             board_id: {
-              type: "number",
+              type: ["number", "string"],
               description: "Board ID to fetch sprints from",
             },
           },
@@ -670,11 +670,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "Parent issue key for sub-tasks (e.g. 'QT-1234')",
             },
             sprint_id: {
-              type: "number",
+              type: ["number", "string"],
               description: "Sprint ID to assign the issue to (use list_sprints to find IDs)",
             },
             story_points: {
-              type: "number",
+              type: ["number", "string"],
               description: "Story points estimate",
             },
             epic_name: {
@@ -801,7 +801,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "Epic issue key (e.g., 'QT-1000')",
             },
             max_results: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum child issues to return (default: 100)",
               default: 100,
             },
@@ -934,7 +934,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               default: "QT",
             },
             sprint_count: {
-              type: "number",
+              type: ["number", "string"],
               description: "Number of past sprints to analyze (default: 3)",
               default: 3,
             },
@@ -1024,7 +1024,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "Optional: specific sprint name. If omitted, uses open sprints",
             },
             max_results: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum results (default: 1000)",
               default: 1000,
             },
@@ -1060,7 +1060,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
           type: "object",
           properties: {
             board_id: {
-              type: "number",
+              type: ["number", "string"],
               description: "Board ID (get from list_boards)",
             },
           },
@@ -1076,7 +1076,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
           type: "object",
           properties: {
             sprint_id: {
-              type: "number",
+              type: ["number", "string"],
               description: "Sprint ID (get from list_sprints or list_boards)",
             },
           },
@@ -1158,7 +1158,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "End date ISO format (e.g., '2025-09-23'). Used with date_from",
             },
             max_issues: {
-              type: "number",
+              type: ["number", "string"],
               description: "Max issues to fetch worklogs for (default: 200). Use small values for testing",
               default: 200,
             },
@@ -1183,7 +1183,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "Sprint name. If omitted, uses open sprints",
             },
             max_issues: {
-              type: "number",
+              type: ["number", "string"],
               description: "Max issues to process (default: 100). Use small values for testing",
               default: 100,
             },
@@ -1249,7 +1249,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
           type: "object",
           properties: {
             sprint_id: {
-              type: "number",
+              type: ["number", "string"],
               description: "Target sprint ID (get from list_sprints)",
             },
             issue_keys: {
@@ -1446,7 +1446,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "Attachment ID from quicktext-jira_list_attachments (e.g., '202820')",
             },
             max_size_mb: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum file size to download in MB (default: 10)",
               default: 10,
             },
@@ -1467,12 +1467,12 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
               description: "Issue key (e.g., 'QT-15415')",
             },
             max_size_mb: {
-              type: "number",
+              type: ["number", "string"],
               description: "Max size per image in MB (default: 10)",
               default: 10,
             },
             max_images: {
-              type: "number",
+              type: ["number", "string"],
               description: "Maximum number of images to download (default: 5, hard cap: 5)",
               default: 5,
             },
@@ -1911,7 +1911,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const jql = `project = "${project_key}" AND sprint in openSprints()`;
         const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status&expand=changelog`
+          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,created&expand=changelog`
         );
 
         const statusTimes = {};
@@ -1919,7 +1919,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         data.issues.forEach(issue => {
           const changelog = issue.changelog?.histories || [];
           let currentStatus = issue.fields.status?.name;
-          let currentTime = new Date(issue.fields.created).getTime();
+          let currentTime = new Date(issue.fields.created || issue.fields?.created).getTime();
 
           changelog.forEach(history => {
             const statusChange = history.items.find(item => item.field === "status");
@@ -1933,7 +1933,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               statusTimes[currentStatus].total_ms += duration;
               statusTimes[currentStatus].count++;
 
-              currentStatus = statusChange.toString;
+              currentStatus = statusChange.to;
               currentTime = changeTime;
             }
           });
