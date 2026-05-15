@@ -4415,20 +4415,65 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-confluence_get_page_history": {
         const { page_id, limit = 10 } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
-        const data = await confluenceRequest(`/rest/api/content/${page_id}/version?expand=content&limit=${limit}`);
+
+        // Try /version endpoint first (Confluence Cloud + some DC versions)
+        // Fall back to /history endpoint (Confluence Server 7.x)
+        let versions: any[] = [];
+        let source = "version";
+        try {
+          const data = await confluenceRequest(`/rest/api/content/${page_id}/version?limit=${limit}`);
+          versions = (data.results ?? []).map((v: any) => ({
+            version: v.number,
+            message: v.message ?? '',
+            minor_edit: v.minorEdit,
+            when: v.when,
+            author: v.by?.displayName,
+          }));
+        } catch (versionErr: any) {
+          if (versionErr.error_code === ConfluenceErrorCodes.PAGE_NOT_FOUND) {
+            // /version endpoint not available — fall back to /history
+            source = "history";
+            const hist = await confluenceRequest(
+              `/rest/api/content/${page_id}?expand=version,history,history.previousVersion,history.lastUpdated`
+            );
+            // Build a version list from what the history endpoint gives us
+            const current = hist.version;
+            const lastUpdated = hist.history?.lastUpdated;
+            const created = hist.history;
+            if (current) {
+              versions.push({
+                version: current.number,
+                message: current.message ?? '',
+                minor_edit: current.minorEdit ?? false,
+                when: lastUpdated?.when ?? null,
+                author: lastUpdated?.by?.displayName ?? created?.createdBy?.displayName,
+              });
+            }
+            if (created && current?.number > 1) {
+              versions.push({
+                version: 1,
+                message: '',
+                minor_edit: false,
+                when: created.createdDate,
+                author: created.createdBy?.displayName,
+              });
+            }
+          } else {
+            throw versionErr;
+          }
+        }
+
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: true,
               page_id,
-              versions: (data.results ?? []).map((v: any) => ({
-                version: v.number,
-                message: v.message ?? '',
-                minor_edit: v.minorEdit,
-                when: v.when,
-                author: v.by?.displayName,
-              })),
+              source,
+              note: source === "history"
+                ? "Full version list unavailable on this Confluence Server version — showing current and initial versions only"
+                : undefined,
+              versions,
             }, null, 2),
           }],
         };
