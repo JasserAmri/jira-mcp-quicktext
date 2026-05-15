@@ -85,7 +85,7 @@ const ConfluenceErrorCodes = {
 };
 
 // Rate limit tracking
-let rateLimitInfo = {
+let rateLimitInfo: { remaining: number | null; limit: number | null; reset: string | null } = {
   remaining: null,
   limit: null,
   reset: null,
@@ -105,7 +105,7 @@ const server = new Server(
 );
 
 // Structured error helper
-function createError(code, message, details = {}, suggestedAction = null) {
+function createError(code: string, message: string, details: Record<string, any> = {}, suggestedAction: string | null = null) {
   return {
     error_code: code,
     error_message: message,
@@ -116,7 +116,7 @@ function createError(code, message, details = {}, suggestedAction = null) {
 }
 
 // Jira API helper with rate limit tracking and error handling
-async function jiraRequest(endpoint, options = {}) {
+async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
   const url = `${JIRA_BASE_URL}${endpoint}`;
   
   try {
@@ -190,7 +190,7 @@ async function jiraRequest(endpoint, options = {}) {
     // Handle empty responses (e.g. Jira 204 No Content on transitions)
     const text = await response.text();
     return text ? JSON.parse(text) : {};
-  } catch (error) {
+  } catch (error: any) {
     if (error.error_code) {
       throw error; // Already a structured error
     }
@@ -323,7 +323,7 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
 }
 
 // Helper: Parse time logged by role from customfield_10300
-function parseTimeLoggedByRole(customfield10300) {
+function parseTimeLoggedByRole(customfield10300: any) {
   const roles = { Developer: 0, Tester: 0, Reviewer: 0 };
   
   if (!customfield10300 || !Array.isArray(customfield10300)) {
@@ -348,7 +348,7 @@ function parseTimeLoggedByRole(customfield10300) {
 }
 
 // Helper: Parse assignee roles from customfield_10301
-function parseAssigneeRoles(customfield10301) {
+function parseAssigneeRoles(customfield10301: any) {
   const assignments = { dev: null, test: null };
   
   if (!customfield10301 || !Array.isArray(customfield10301)) {
@@ -374,7 +374,7 @@ function parseAssigneeRoles(customfield10301) {
 
 // Helper: Parse sprint from Jira's Java toString() format
 // Format: "com.atlassian.greenhopper.service.sprint.Sprint@xxx[id=304,rapidViewId=4,state=ACTIVE,name=QUIC Sprint 197,startDate=2026-01-27T15:17:00.000Z,endDate=2026-02-10T15:17:00.000Z,...]"
-function parseSprint(sprintData) {
+function parseSprint(sprintData: any) {
   if (!sprintData) return null;
   
   // If it's already an object with expected properties, return as-is
@@ -418,7 +418,7 @@ function parseSprint(sprintData) {
 }
 
 // Helper: Parse sprints array from customfield_10008
-function parseSprints(customfield10008) {
+function parseSprints(customfield10008: any) {
   if (!customfield10008 || !Array.isArray(customfield10008)) {
     return [];
   }
@@ -1790,7 +1790,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
 // Tool request handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name } = request.params;
+  const args = (request.params.arguments ?? {}) as Record<string, any>;
 
   try {
     switch (name) {
@@ -1883,7 +1884,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 total: data.total,
                 returned: data.issues.length,
                 max_results,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2009,7 +2010,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 jql_query: jql,
                 total: data.total,
                 returned: data.issues.length,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2037,7 +2038,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
 
         const totals = { Developer: 0, Tester: 0, Reviewer: 0 };
-        const tickets = data.issues.map(issue => {
+        const tickets = data.issues.map((issue: any) =>{
           const timeByRole = parseTimeLoggedByRole(issue.fields.customfield_10300);
           
           Object.keys(timeByRole).forEach(role => {
@@ -2311,7 +2312,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                sprints: data.values.map(sprint => ({
+                sprints: data.values.map((sprint: any) =>({
                   id: sprint.id,
                   name: sprint.name,
                   state: sprint.state,
@@ -2719,7 +2720,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 epic_key,
                 total_children: data.total,
-                children: data.issues.map(issue => ({
+                children: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2762,7 +2763,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         const customFields = data
           .filter(field => field.id.startsWith("customfield_"))
-          .map(field => ({
+          .map((field: any) =>({
             id: field.id,
             name: field.name,
             type: field.schema?.type,
@@ -2900,7 +2901,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}`);
 
-        const links = (data.fields.issuelinks || []).map(link => {
+        const links = (data.fields.issuelinks || []).map((link: any) =>{
           if (link.outwardIssue) {
             return {
               type: link.type.outward,
@@ -2939,10 +2940,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}?expand=changelog`);
 
-        const history = (data.changelog?.histories || []).map(change => ({
+        const history = (data.changelog?.histories || []).map((change: any) =>({
           author: change.author.displayName,
           created: change.created,
-          changes: change.items.map(item => ({
+          changes: change.items.map((item: any) =>({
             field: item.field,
             from: item.fromString,
             to: item.toString,
@@ -2998,7 +2999,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 total_blocked: data.total,
-                blocked_issues: data.issues.map(issue => ({
+                blocked_issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -3106,7 +3107,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }),
             });
             results.push({ issue_key: key, success: true });
-          } catch (error) {
+          } catch (error: any) {
             results.push({ issue_key: key, success: false, error: error.error_message });
           }
         }
@@ -3162,7 +3163,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 total: data.total,
                 returned: data.issues.length,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -3243,7 +3244,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let config = {};
         try {
           config = await jiraRequest(`/rest/agile/1.0/board/${board_id}/configuration`);
-        } catch (error) {
+        } catch (error: any) {
           // Configuration not available, continue without it
         }
         
@@ -4577,7 +4578,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           "Check tool name spelling. Tools start with quicktext-jira_ or quicktext-confluence_"
         );
     }
-  } catch (error) {
+  } catch (error: any) {
     // If it's already a structured error, return it as-is
     if (error.error_code) {
       return {

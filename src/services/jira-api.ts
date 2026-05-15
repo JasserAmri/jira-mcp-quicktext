@@ -243,7 +243,7 @@ export class JiraApiService {
 
     // Handle empty responses (e.g. Jira 204 No Content on transitions)
     const text = await response.text();
-    return text ? JSON.parse(text) : {};
+    return text ? JSON.parse(text) : ({} as T);
   }
 
   async searchIssues(searchString: string): Promise<SearchIssuesResponse> {
