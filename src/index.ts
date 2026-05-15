@@ -134,10 +134,10 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
 
     // Track rate limits
     if (response.headers.has("X-RateLimit-Remaining")) {
-      rateLimitInfo.remaining = parseInt(response.headers.get("X-RateLimit-Remaining"));
+      rateLimitInfo.remaining = parseInt(response.headers.get("X-RateLimit-Remaining") ?? "");
     }
     if (response.headers.has("X-RateLimit-Limit")) {
-      rateLimitInfo.limit = parseInt(response.headers.get("X-RateLimit-Limit"));
+      rateLimitInfo.limit = parseInt(response.headers.get("X-RateLimit-Limit") ?? "");
     }
     if (response.headers.has("X-RateLimit-Reset")) {
       rateLimitInfo.reset = response.headers.get("X-RateLimit-Reset");
@@ -324,7 +324,7 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
 
 // Helper: Parse time logged by role from customfield_10300
 function parseTimeLoggedByRole(customfield10300: any) {
-  const roles = { Developer: 0, Tester: 0, Reviewer: 0 };
+  const roles: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
   
   if (!customfield10300 || !Array.isArray(customfield10300)) {
     return roles;
@@ -1828,13 +1828,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   created: data.fields.created,
                   updated: data.fields.updated,
                   description: data.renderedFields?.description || data.fields.description,
-                  comments: data.fields.comment?.comments?.map(c => ({
+                  comments: data.fields.comment?.comments?.map((c: any) => ({
                     author: c.author.displayName,
                     body: c.body,
                     created: c.created,
                   })) || [],
                   labels: data.fields.labels || [],
-                  components: data.fields.components?.map(c => c.name) || [],
+                  components: data.fields.components?.map((c: any) => c.name) || [],
                   story_points: data.fields.customfield_10023,
                   time_estimate: data.fields.timeestimate,
                   time_logged: data.fields.timespent,
@@ -1894,7 +1894,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   created: issue.fields.created,
                   updated: issue.fields.updated,
                   labels: issue.fields.labels || [],
-                  components: issue.fields.components?.map(c => c.name) || [],
+                  components: issue.fields.components?.map((c: any) => c.name) || [],
                   story_points: issue.fields.customfield_10023,
                   assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
                   sprints: parseSprints(issue.fields.customfield_10008),
@@ -1914,8 +1914,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=assignee,status`
         );
 
-        const workload = {};
-        data.issues.forEach(issue => {
+        const workload: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const assignee = issue.fields.assignee?.displayName || "Unassigned";
           const status = issue.fields.status?.name || "Unknown";
           
@@ -1951,10 +1951,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,components,status,created`
         );
 
-        const byComponent = {};
-        data.issues.forEach(issue => {
-          const components = issue.fields.components?.map(c => c.name) || ["No Component"];
-          components.forEach(comp => {
+        const byComponent: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          const components = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
+          components.forEach((comp: any) => {
             if (!byComponent[comp]) {
               byComponent[comp] = { count: 0, issues: [] };
             }
@@ -2037,7 +2037,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,timeestimate,customfield_10300`
         );
 
-        const totals = { Developer: 0, Tester: 0, Reviewer: 0 };
+        const totals: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
         const tickets = data.issues.map((issue: any) =>{
           const timeByRole = parseTimeLoggedByRole(issue.fields.customfield_10300);
           
@@ -2087,7 +2087,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let unassignedDev = 0;
         let unassignedTest = 0;
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const roles = parseAssigneeRoles(issue.fields.customfield_10301);
           if (!roles.dev) unassignedDev++;
           if (!roles.test) unassignedTest++;
@@ -2124,7 +2124,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const results = {};
+        const results: Record<string, any> = {};
 
         for (const label of labels) {
           const jql = `project = "${project_key}" AND sprint in openSprints() AND labels = "${label}"`;
@@ -2132,8 +2132,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,summary`
           );
 
-          const statusBreakdown = {};
-          data.issues.forEach(issue => {
+          const statusBreakdown: Record<string, any> = {};
+          data.issues.forEach((issue: any) => {
             const status = issue.fields.status?.name || "Unknown";
             statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
           });
@@ -2141,7 +2141,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           results[label] = {
             count: data.total,
             status_breakdown: statusBreakdown,
-            issues: data.issues.map(i => ({ key: i.key, summary: i.fields.summary })),
+            issues: data.issues.map((i: any) => ({ key: i.key, summary: i.fields.summary })),
           };
         }
 
@@ -2184,15 +2184,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=labels`
         );
 
-        const labelCounts = {};
-        data.issues.forEach(issue => {
-          (issue.fields.labels || []).forEach(label => {
+        const labelCounts: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          (issue.fields.labels || []).forEach((label: any) => {
             labelCounts[label] = (labelCounts[label] || 0) + 1;
           });
         });
 
         const sortedLabels = Object.entries(labelCounts)
-          .sort((a, b) => b[1] - a[1])
+          .sort((a: any, b: any) => (b[1] as number) - (a[1] as number))
           .map(([label, count]) => ({ label, count }));
 
         return {
@@ -2218,15 +2218,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,created&expand=changelog`
         );
 
-        const statusTimes = {};
+        const statusTimes: Record<string, any> = {};
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const changelog = issue.changelog?.histories || [];
           let currentStatus = issue.fields.status?.name;
           let currentTime = new Date(issue.fields.created || issue.fields?.created).getTime();
 
-          changelog.forEach(history => {
-            const statusChange = history.items.find(item => item.field === "status");
+          changelog.forEach((history: any) => {
+            const statusChange = history.items.find((item: any) => item.field === "status");
             if (statusChange) {
               const changeTime = new Date(history.created).getTime();
               const duration = changeTime - currentTime;
@@ -2243,10 +2243,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         });
 
-        const averages = Object.entries(statusTimes).map(([status, data]) => ({
+        const averages = Object.entries(statusTimes).map(([status, statusData]: [string, any]) => ({
           status,
-          average_hours: (data.total_ms / data.count / 1000 / 3600).toFixed(2),
-          issue_count: data.count,
+          average_hours: (statusData.total_ms / statusData.count / 1000 / 3600).toFixed(2),
+          issue_count: statusData.count,
         }));
 
         return {
@@ -2274,7 +2274,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
           
           const sprintsMap = new Map();
-          data.issues.forEach(issue => {
+          data.issues.forEach((issue: any) => {
             const sprints = parseSprints(issue.fields.customfield_10008);
             sprints.forEach(sprint => {
               if (sprint && sprint.id && !sprintsMap.has(sprint.id)) {
@@ -2746,7 +2746,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 issue_key,
-                available_transitions: data.transitions.map(t => ({
+                available_transitions: data.transitions.map((t: any) => ({
                   id: t.id,
                   name: t.name,
                   to_status: t.to?.name,
@@ -2762,7 +2762,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = await jiraRequest("/rest/api/2/field");
 
         const customFields = data
-          .filter(field => field.id.startsWith("customfield_"))
+          .filter((field: any) => field.id.startsWith("customfield_"))
           .map((field: any) =>({
             id: field.id,
             name: field.name,
@@ -2794,7 +2794,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const results = {};
+        const results: Record<string, any> = {};
 
         for (const name of assignee_names) {
           const jql = `project = "${project_key}" AND sprint in openSprints() AND assignee = "${name}"`;
@@ -2804,7 +2804,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           results[name] = {
             count: data.total,
-            issues: data.issues.map(i => ({
+            issues: data.issues.map((i: any) => ({
               key: i.key,
               summary: i.fields.summary,
               status: i.fields.status?.name,
@@ -2831,13 +2831,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status`
         );
 
-        const distribution = {};
-        data.issues.forEach(issue => {
+        const distribution: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const status = issue.fields.status?.name || "Unknown";
           distribution[status] = (distribution[status] || 0) + 1;
         });
 
-        const stats = Object.entries(distribution).map(([status, count]) => ({
+        const stats = Object.entries(distribution).map(([status, count]: [string, any]) => ({
           status,
           count,
           percentage: ((count / data.total) * 100).toFixed(2) + "%",
@@ -2866,19 +2866,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=reporter`
         );
 
-        const reporterCounts = {};
-        data.issues.forEach(issue => {
+        const reporterCounts: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const reporter = issue.fields.reporter?.displayName || "Unknown";
           reporterCounts[reporter] = (reporterCounts[reporter] || 0) + 1;
         });
 
         const stats = Object.entries(reporterCounts)
-          .map(([reporter, count]) => ({
+          .map(([reporter, count]: [string, any]) => ({
             reporter,
             count,
             percentage: ((count / data.total) * 100).toFixed(2) + "%",
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
         return {
           content: [
@@ -3021,13 +3021,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=priority`
         );
 
-        const priorities = {};
-        data.issues.forEach(issue => {
+        const priorities: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const priority = issue.fields.priority?.name || "None";
           priorities[priority] = (priorities[priority] || 0) + 1;
         });
 
-        const breakdown = Object.entries(priorities).map(([priority, count]) => ({
+        const breakdown = Object.entries(priorities).map(([priority, count]: [string, any]) => ({
           priority,
           count,
           percentage: ((count / data.total) * 100).toFixed(2) + "%",
@@ -3056,21 +3056,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=components`
         );
 
-        const components = {};
-        data.issues.forEach(issue => {
-          const comps = issue.fields.components?.map(c => c.name) || ["No Component"];
-          comps.forEach(comp => {
+        const components: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          const comps = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
+          comps.forEach((comp: any) => {
             components[comp] = (components[comp] || 0) + 1;
           });
         });
 
         const breakdown = Object.entries(components)
-          .map(([component, count]) => ({
+          .map(([component, count]: [string, any]) => ({
             component,
             count,
             percentage: ((count / data.total) * 100).toFixed(2) + "%",
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
         return {
           content: [
@@ -3213,7 +3213,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 total: data.values.length,
-                boards: data.values.map(b => ({
+                boards: data.values.map((b: any) => ({
                   id: b.id,
                   name: b.name,
                   type: b.type,
@@ -3280,7 +3280,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Calculate duration metrics if dates are available
         let duration = null;
         if (data.startDate && data.endDate) {
-          const calendarDays = Math.ceil((new Date(data.endDate) - new Date(data.startDate)) / 86400000);
+          const calendarDays = Math.ceil((new Date(data.endDate).getTime() - new Date(data.startDate).getTime()) / 86400000);
           const workingDays = calculateWorkingDays(data.startDate, data.endDate);
           
           duration = {
@@ -3330,7 +3330,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const testerName = issue.fields.customfield_10018?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10705 ?? 0;
@@ -3390,7 +3390,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const reviewerName = issue.fields.customfield_10020?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10806 ?? 0;
