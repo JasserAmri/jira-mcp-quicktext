@@ -1787,7 +1787,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       // 69. MOVE PAGE
       {
         name: "quicktext-confluence_move_page",
-        description: "Move a Confluence page to a different parent or space, including cross-space moves. Uses Confluence Server's dedicated move API. Provide target_parent_id to move under a specific page (works across spaces too), or target_space_key alone to move to that space's homepage. Example: quicktext-confluence_move_page({page_id: '123456', target_parent_id: '789012'}) or quicktext-confluence_move_page({page_id: '123456', target_space_key: 'QUIC', target_parent_id: '100'})",
+        description: "Move a Confluence page to a different parent within the SAME space (e.g. reorganise the QUIC page tree). Cross-space moves are NOT supported by the Confluence Server REST API — those must be done via the UI (open page → ··· → Move). Example: quicktext-confluence_move_page({page_id: '123456', target_parent_id: '789012'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -4639,50 +4639,68 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "Provide at least target_space_key or target_parent_id");
         }
 
-        // Resolve the target page to move under.
-        // Confluence Server uses PUT /rest/api/content/{id}/move/append/{targetId}
-        // which correctly handles cross-space moves (unlike PUT /rest/api/content/{id}).
-        let resolvedTargetId = target_parent_id;
+        // Fetch current page to determine current space and get required fields for PUT
+        const current = await confluenceRequest(
+          `/rest/api/content/${page_id}?expand=body.storage,version,space,ancestors`
+        );
 
-        if (!resolvedTargetId) {
-          // No explicit parent — move to the homepage of the target space
-          const spaceData = await confluenceRequest(
-            `/rest/api/space/${target_space_key}?expand=homepage`
+        const currentSpaceKey = current.space?.key;
+        const isCrossSpaceMove = target_space_key && target_space_key !== currentSpaceKey;
+
+        if (isCrossSpaceMove) {
+          // Confluence Server 7.x does not support cross-space moves via REST API.
+          // The /move endpoint is Cloud-only (404 on Server).
+          // The PUT /rest/api/content/{id} space change returns 403 on Server.
+          // Cross-space moves must be done via the Confluence UI:
+          //   Space Tools → Content Tools → Reorder Pages, or drag in page tree.
+          throw createError(
+            ConfluenceErrorCodes.FORBIDDEN,
+            `Cross-space moves are not supported by the Confluence Server REST API. Cannot move page from space '${currentSpaceKey}' to '${target_space_key}' via API.`,
+            {
+              page_id,
+              current_space: currentSpaceKey,
+              target_space: target_space_key,
+              workaround: "Ask the page owner or a Confluence admin to move it via the UI: open the page → ··· menu → Move, or use Space Tools → Reorder Pages",
+            },
+            "Use the Confluence UI to perform cross-space moves: open the page → click ··· → Move"
           );
-          if (!spaceData.homepage?.id) {
-            throw createError(
-              ConfluenceErrorCodes.SPACE_NOT_FOUND,
-              `Cannot resolve homepage for space '${target_space_key}'. Provide target_parent_id explicitly.`,
-              { space_key: target_space_key }
-            );
-          }
-          resolvedTargetId = spaceData.homepage.id;
         }
 
-        // Use the dedicated move endpoint — supports cross-space moves on Confluence Server
-        await confluenceRequest(`/rest/api/content/${page_id}/move/append/${resolvedTargetId}`, {
-          method: "PUT",
-          body: JSON.stringify({}),
-        });
+        // Same-space parent change — use PUT with updated ancestors
+        const newVersion = (current.version?.number ?? 1) + 1;
+        const payload: any = {
+          id: String(page_id),
+          type: "page",
+          title: current.title,
+          version: { number: newVersion },
+          space: { key: currentSpaceKey },
+          body: current.body,
+        };
 
-        // Fetch updated page to confirm new location
-        const updated = await confluenceRequest(
-          `/rest/api/content/${page_id}?expand=space,ancestors,version`
-        );
+        if (target_parent_id) {
+          payload.ancestors = [{ id: String(target_parent_id) }];
+        } else {
+          // Keep existing parent
+          if (current.ancestors?.length) {
+            payload.ancestors = [{ id: current.ancestors[current.ancestors.length - 1].id }];
+          }
+        }
+
+        const data = await confluenceRequest(`/rest/api/content/${page_id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
 
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: true,
-              page_id: updated.id,
-              title: updated.title,
-              new_space: updated.space?.key,
-              new_parent: updated.ancestors?.length
-                ? { id: updated.ancestors[updated.ancestors.length - 1].id, title: updated.ancestors[updated.ancestors.length - 1].title }
-                : null,
-              version: updated.version?.number,
-              url: CONFLUENCE_BASE_URL + (updated._links?.webui ?? ''),
+              page_id: data.id,
+              title: data.title,
+              space: data.space?.key,
+              new_version: data.version?.number,
+              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
             }, null, 2),
           }],
         };
