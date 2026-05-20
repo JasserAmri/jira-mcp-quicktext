@@ -1787,7 +1787,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       // 69. MOVE PAGE
       {
         name: "quicktext-confluence_move_page",
-        description: "Move a Confluence page to a different parent or space. Provide target_space_key to move across spaces, target_parent_id to change parent within the same space, or both for a cross-space move with a specific parent. Example: quicktext-confluence_move_page({page_id: '123456', target_space_key: 'DEV', target_parent_id: '100'})",
+        description: "Move a Confluence page to a different parent or space, including cross-space moves. Uses Confluence Server's dedicated move API. Provide target_parent_id to move under a specific page (works across spaces too), or target_space_key alone to move to that space's homepage. Example: quicktext-confluence_move_page({page_id: '123456', target_parent_id: '789012'}) or quicktext-confluence_move_page({page_id: '123456', target_space_key: 'QUIC', target_parent_id: '100'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -4639,51 +4639,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "Provide at least target_space_key or target_parent_id");
         }
 
-        // Fetch current page to get title, body, version and current space
-        const current = await confluenceRequest(
-          `/rest/api/content/${page_id}?expand=body.storage,version,space,ancestors`
-        );
+        // Resolve the target page to move under.
+        // Confluence Server uses PUT /rest/api/content/{id}/move/append/{targetId}
+        // which correctly handles cross-space moves (unlike PUT /rest/api/content/{id}).
+        let resolvedTargetId = target_parent_id;
 
-        const newSpaceKey = target_space_key ?? current.space?.key;
-        const newVersion = (current.version?.number ?? 1) + 1;
-
-        const payload: any = {
-          id: String(page_id),
-          type: "page",
-          title: current.title,
-          version: { number: newVersion },
-          space: { key: newSpaceKey },
-          body: current.body,
-        };
-
-        // Set parent: explicit target, or root of space if moving cross-space without specifying parent
-        if (target_parent_id) {
-          payload.ancestors = [{ id: String(target_parent_id) }];
-        } else if (target_space_key && target_space_key !== current.space?.key) {
-          // Cross-space move with no parent specified — move to space root (no ancestors)
-          payload.ancestors = [];
-        } else {
-          // Keep existing parent
-          if (current.ancestors?.length) {
-            payload.ancestors = [{ id: current.ancestors[current.ancestors.length - 1].id }];
+        if (!resolvedTargetId) {
+          // No explicit parent — move to the homepage of the target space
+          const spaceData = await confluenceRequest(
+            `/rest/api/space/${target_space_key}?expand=homepage`
+          );
+          if (!spaceData.homepage?.id) {
+            throw createError(
+              ConfluenceErrorCodes.SPACE_NOT_FOUND,
+              `Cannot resolve homepage for space '${target_space_key}'. Provide target_parent_id explicitly.`,
+              { space_key: target_space_key }
+            );
           }
+          resolvedTargetId = spaceData.homepage.id;
         }
 
-        const data = await confluenceRequest(`/rest/api/content/${page_id}`, {
+        // Use the dedicated move endpoint — supports cross-space moves on Confluence Server
+        await confluenceRequest(`/rest/api/content/${page_id}/move/append/${resolvedTargetId}`, {
           method: "PUT",
-          body: JSON.stringify(payload),
+          body: JSON.stringify({}),
         });
+
+        // Fetch updated page to confirm new location
+        const updated = await confluenceRequest(
+          `/rest/api/content/${page_id}?expand=space,ancestors,version`
+        );
 
         return {
           content: [{
             type: "text",
             text: JSON.stringify({
               success: true,
-              page_id: data.id,
-              title: data.title,
-              new_space: data.space?.key,
-              new_version: data.version?.number,
-              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+              page_id: updated.id,
+              title: updated.title,
+              new_space: updated.space?.key,
+              new_parent: updated.ancestors?.length
+                ? { id: updated.ancestors[updated.ancestors.length - 1].id, title: updated.ancestors[updated.ancestors.length - 1].title }
+                : null,
+              version: updated.version?.number,
+              url: CONFLUENCE_BASE_URL + (updated._links?.webui ?? ''),
             }, null, 2),
           }],
         };
