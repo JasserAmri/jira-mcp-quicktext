@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 
 /**
- * QuickText Jira MCP Server v4.6.0 (Production-Ready)
+ * QuickText Jira + Confluence MCP Server v5.0.0
  * Enhanced with MCP Best Practices + Phase 2 Discovery Suite
- * 
+ *
  * Production Features:
- * ✅ Vendor Prefix: All tools use quicktext-jira_ prefix (underscore, not slash)
+ * ✅ Vendor Prefix: quicktext-jira_ (53 tools) + quicktext-confluence_ (16 tools)
  * ✅ Enhanced Descriptions: Comprehensive tool documentation with examples
- * ✅ Structured Errors: Machine-readable error codes (JIRA_1xxx-5xxx)
- * ✅ Tool Count: 53 tools (50 core + 3 Attachment Suite)
+ * ✅ Structured Errors: Machine-readable error codes (JIRA_1xxx-5xxx, CONF_1xxx-5xxx)
+ * ✅ Tool Count: 69 tools total (53 Jira + 16 Confluence)
  * ✅ Structured Outputs: JSON schemas with validation
  * ✅ Jira Agile API: Uses /rest/agile/1.0/ for board/sprint discovery
  * ✅ Data Center Compatible: Tested on Jira v9.4.5
+ * ✅ Confluence Server: Supports Confluence Server 7.9+ (REST API v1)
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -26,6 +27,13 @@ const JIRA_BASE_URL = process.env.JIRA_BASE_URL ?? '';
 const JIRA_PAT = process.env.JIRA_API_TOKEN ?? '';
 const JIRA_AUTH_TYPE = process.env.JIRA_AUTH_TYPE ?? 'bearer';
 const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL ?? '';
+
+// Confluence configuration (optional — tools are disabled if not set)
+const CONFLUENCE_BASE_URL = (process.env.CONFLUENCE_BASE_URL ?? '').replace(/\/$/, '');
+const CONFLUENCE_API_TOKEN = process.env.CONFLUENCE_API_TOKEN ?? '';
+const CONFLUENCE_AUTH_TYPE = process.env.CONFLUENCE_AUTH_TYPE ?? 'bearer';
+const CONFLUENCE_USER_EMAIL = process.env.CONFLUENCE_USER_EMAIL ?? '';
+const confluenceEnabled = Boolean(CONFLUENCE_BASE_URL && CONFLUENCE_API_TOKEN);
 
 if (!JIRA_BASE_URL || !JIRA_PAT) {
   console.error('ERROR: Missing required environment variables.');
@@ -62,8 +70,22 @@ const ErrorCodes = {
   TIMEOUT: "JIRA_5003",
 };
 
+// Confluence error codes (CONF_1xxx-5xxx)
+const ConfluenceErrorCodes = {
+  UNAUTHORIZED:      "CONF_1001",
+  FORBIDDEN:         "CONF_1002",
+  INVALID_PARAMETER: "CONF_2001",
+  MISSING_REQUIRED:  "CONF_2002",
+  PAGE_NOT_FOUND:    "CONF_3001",
+  SPACE_NOT_FOUND:   "CONF_3002",
+  RATE_LIMIT:        "CONF_4001",
+  API_ERROR:         "CONF_5001",
+  NETWORK_ERROR:     "CONF_5002",
+  NOT_CONFIGURED:    "CONF_5003",
+};
+
 // Rate limit tracking
-let rateLimitInfo = {
+let rateLimitInfo: { remaining: number | null; limit: number | null; reset: string | null } = {
   remaining: null,
   limit: null,
   reset: null,
@@ -72,8 +94,8 @@ let rateLimitInfo = {
 // Create server
 const server = new Server(
   {
-    name: "jira-enhanced-quicktext",
-    version: "4.7.0",
+    name: "jira-confluence-quicktext",
+    version: "5.0.0",
   },
   {
     capabilities: {
@@ -83,7 +105,7 @@ const server = new Server(
 );
 
 // Structured error helper
-function createError(code, message, details = {}, suggestedAction = null) {
+function createError(code: string, message: string, details: Record<string, any> = {}, suggestedAction: string | null = null) {
   return {
     error_code: code,
     error_message: message,
@@ -94,7 +116,7 @@ function createError(code, message, details = {}, suggestedAction = null) {
 }
 
 // Jira API helper with rate limit tracking and error handling
-async function jiraRequest(endpoint, options = {}) {
+async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
   const url = `${JIRA_BASE_URL}${endpoint}`;
   
   try {
@@ -112,10 +134,10 @@ async function jiraRequest(endpoint, options = {}) {
 
     // Track rate limits
     if (response.headers.has("X-RateLimit-Remaining")) {
-      rateLimitInfo.remaining = parseInt(response.headers.get("X-RateLimit-Remaining"));
+      rateLimitInfo.remaining = parseInt(response.headers.get("X-RateLimit-Remaining") ?? "");
     }
     if (response.headers.has("X-RateLimit-Limit")) {
-      rateLimitInfo.limit = parseInt(response.headers.get("X-RateLimit-Limit"));
+      rateLimitInfo.limit = parseInt(response.headers.get("X-RateLimit-Limit") ?? "");
     }
     if (response.headers.has("X-RateLimit-Reset")) {
       rateLimitInfo.reset = response.headers.get("X-RateLimit-Reset");
@@ -168,7 +190,7 @@ async function jiraRequest(endpoint, options = {}) {
     // Handle empty responses (e.g. Jira 204 No Content on transitions)
     const text = await response.text();
     return text ? JSON.parse(text) : {};
-  } catch (error) {
+  } catch (error: any) {
     if (error.error_code) {
       throw error; // Already a structured error
     }
@@ -180,6 +202,73 @@ async function jiraRequest(endpoint, options = {}) {
       "Check network connectivity and Jira server status"
     );
   }
+}
+
+// Confluence API helper — mirrors jiraRequest() pattern
+async function confluenceRequest(endpoint: string, options: any = {}): Promise<any> {
+  if (!confluenceEnabled) {
+    throw createError(
+      ConfluenceErrorCodes.NOT_CONFIGURED,
+      "Confluence not configured. Set CONFLUENCE_BASE_URL and CONFLUENCE_API_TOKEN environment variables.",
+      {},
+      "Add CONFLUENCE_BASE_URL and CONFLUENCE_API_TOKEN to your environment or MCP config"
+    );
+  }
+
+  const url = `${CONFLUENCE_BASE_URL}${endpoint}`;
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        "Authorization": CONFLUENCE_AUTH_TYPE === 'basic'
+          ? `Basic ${Buffer.from(`${CONFLUENCE_USER_EMAIL}:${CONFLUENCE_API_TOKEN}`).toString('base64')}`
+          : `Bearer ${CONFLUENCE_API_TOKEN}`,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      let errorBody: any = null;
+      try {
+        const errText = await response.text();
+        errorBody = errText ? JSON.parse(errText) : null;
+      } catch (_) { /* ignore */ }
+
+      if (response.status === 401) {
+        throw createError(ConfluenceErrorCodes.UNAUTHORIZED, "Confluence authentication failed", { status: 401 }, "Verify CONFLUENCE_API_TOKEN is valid and not expired");
+      } else if (response.status === 403) {
+        throw createError(ConfluenceErrorCodes.FORBIDDEN, "Confluence permission denied", { status: 403 }, "Check user permissions for this space or page");
+      } else if (response.status === 404) {
+        throw createError(ConfluenceErrorCodes.PAGE_NOT_FOUND, "Confluence resource not found", { status: 404, endpoint }, "Verify the page ID, space key, or URL is correct");
+      } else if (response.status === 409) {
+        throw createError(ConfluenceErrorCodes.API_ERROR, "Version conflict: the page was updated since you fetched it", { status: 409 }, "Fetch the page again with quicktext-confluence_get_page to get the latest version number, then retry");
+      } else if (response.status === 429) {
+        throw createError(ConfluenceErrorCodes.RATE_LIMIT, "Confluence rate limit exceeded", { status: 429 }, "Wait before retrying");
+      } else {
+        throw createError(ConfluenceErrorCodes.API_ERROR, `Confluence API error: ${response.status} ${response.statusText}`, { status: response.status, endpoint, response_body: errorBody });
+      }
+    }
+
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  } catch (error: any) {
+    if (error.error_code) throw error;
+    throw createError(ConfluenceErrorCodes.NETWORK_ERROR, `Network error: ${error.message}`, { endpoint, original_error: error.message }, "Check network connectivity and Confluence server status");
+  }
+}
+
+// Strip XHTML tags from Confluence storage format to get plain text
+function extractConfluenceText(storageValue: string): string {
+  return storageValue.replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+// Wrap plain text as Confluence storage format
+function toConfluenceStorage(text: string): string {
+  const escaped = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return `<p>${escaped}</p>`;
 }
 
 // Helper: Fetch a binary URL (attachment content) with PAT auth
@@ -234,8 +323,8 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
 }
 
 // Helper: Parse time logged by role from customfield_10300
-function parseTimeLoggedByRole(customfield10300) {
-  const roles = { Developer: 0, Tester: 0, Reviewer: 0 };
+function parseTimeLoggedByRole(customfield10300: any) {
+  const roles: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
   
   if (!customfield10300 || !Array.isArray(customfield10300)) {
     return roles;
@@ -259,7 +348,7 @@ function parseTimeLoggedByRole(customfield10300) {
 }
 
 // Helper: Parse assignee roles from customfield_10301
-function parseAssigneeRoles(customfield10301) {
+function parseAssigneeRoles(customfield10301: any) {
   const assignments = { dev: null, test: null };
   
   if (!customfield10301 || !Array.isArray(customfield10301)) {
@@ -285,7 +374,7 @@ function parseAssigneeRoles(customfield10301) {
 
 // Helper: Parse sprint from Jira's Java toString() format
 // Format: "com.atlassian.greenhopper.service.sprint.Sprint@xxx[id=304,rapidViewId=4,state=ACTIVE,name=QUIC Sprint 197,startDate=2026-01-27T15:17:00.000Z,endDate=2026-02-10T15:17:00.000Z,...]"
-function parseSprint(sprintData) {
+function parseSprint(sprintData: any) {
   if (!sprintData) return null;
   
   // If it's already an object with expected properties, return as-is
@@ -329,7 +418,7 @@ function parseSprint(sprintData) {
 }
 
 // Helper: Parse sprints array from customfield_10008
-function parseSprints(customfield10008) {
+function parseSprints(customfield10008: any) {
   if (!customfield10008 || !Array.isArray(customfield10008)) {
     return [];
   }
@@ -1480,6 +1569,235 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
           required: ["issue_key"],
         },
       },
+
+      // ─── Confluence Tools ──────────────────────────────────────────────────
+
+      // 54. SEARCH PAGES
+      {
+        name: "quicktext-confluence_search_pages",
+        description: "Search Confluence pages using CQL (Confluence Query Language). Returns matching pages with id, title, space, and last-updated date. Example: quicktext-confluence_search_pages({cql: 'space=DEV AND title~\"onboarding\"', limit: 10})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            cql: { type: "string", description: "CQL query (e.g., 'space=DEV AND type=page AND label=release')" },
+            limit: { type: ["number", "string"], description: "Max results to return (default: 25, max: 50)", default: 25 },
+            start: { type: ["number", "string"], description: "Pagination offset (default: 0)", default: 0 },
+          },
+          required: ["cql"],
+        },
+      },
+
+      // 55. GET PAGE
+      {
+        name: "quicktext-confluence_get_page",
+        description: "Get full details of a Confluence page by its ID, including body content, version, space, and parent. Example: quicktext-confluence_get_page({page_id: '123456'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "Confluence page ID (numeric string)" },
+            include_body: { type: "boolean", description: "Include page body as plain text (default: true)", default: true },
+          },
+          required: ["page_id"],
+        },
+      },
+
+      // 56. GET PAGE BY TITLE
+      {
+        name: "quicktext-confluence_get_page_by_title",
+        description: "Find a Confluence page by space key and exact title. Returns the page with its ID, version and content. Example: quicktext-confluence_get_page_by_title({space_key: 'DEV', title: 'Architecture Overview'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            space_key: { type: "string", description: "Space key (e.g., 'DEV', 'HR', 'IT')" },
+            title: { type: "string", description: "Exact page title to search for" },
+          },
+          required: ["space_key", "title"],
+        },
+      },
+
+      // 57. GET CHILD PAGES
+      {
+        name: "quicktext-confluence_get_child_pages",
+        description: "Get all direct child pages of a Confluence page. Useful for navigating a space's page hierarchy. Example: quicktext-confluence_get_child_pages({page_id: '123456'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "Parent page ID" },
+            limit: { type: ["number", "string"], description: "Max children to return (default: 25)", default: 25 },
+          },
+          required: ["page_id"],
+        },
+      },
+
+      // 58. LIST SPACES
+      {
+        name: "quicktext-confluence_list_spaces",
+        description: "List all available Confluence spaces with their keys, names, types and status. Example: quicktext-confluence_list_spaces({})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: ["number", "string"], description: "Max spaces to return (default: 50)", default: 50 },
+            type: { type: "string", description: "Filter by type: 'global' or 'personal' (optional)" },
+          },
+          required: [],
+        },
+      },
+
+      // 59. GET SPACE
+      {
+        name: "quicktext-confluence_get_space",
+        description: "Get details of a specific Confluence space including description and homepage. Example: quicktext-confluence_get_space({space_key: 'DEV'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            space_key: { type: "string", description: "Space key (e.g., 'DEV')" },
+          },
+          required: ["space_key"],
+        },
+      },
+
+      // 60. GET PAGE LABELS
+      {
+        name: "quicktext-confluence_get_page_labels",
+        description: "Get all labels attached to a Confluence page. Example: quicktext-confluence_get_page_labels({page_id: '123456'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "Page ID" },
+          },
+          required: ["page_id"],
+        },
+      },
+
+      // 61. SEARCH BY LABEL
+      {
+        name: "quicktext-confluence_search_by_label",
+        description: "Find all Confluence pages tagged with a specific label. Example: quicktext-confluence_search_by_label({label: 'architecture', space_key: 'DEV'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "Label name to search for" },
+            space_key: { type: "string", description: "Limit search to this space key (optional)" },
+            limit: { type: ["number", "string"], description: "Max results (default: 25)", default: 25 },
+          },
+          required: ["label"],
+        },
+      },
+
+      // 62. GET PAGE COMMENTS
+      {
+        name: "quicktext-confluence_get_page_comments",
+        description: "Get all comments on a Confluence page with author and date. Example: quicktext-confluence_get_page_comments({page_id: '123456'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "Page ID" },
+            limit: { type: ["number", "string"], description: "Max comments to return (default: 50)", default: 50 },
+          },
+          required: ["page_id"],
+        },
+      },
+
+      // 63. GET PAGE HISTORY
+      {
+        name: "quicktext-confluence_get_page_history",
+        description: "Get the version history of a Confluence page, showing who changed it and when. Example: quicktext-confluence_get_page_history({page_id: '123456', limit: 10})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "Page ID" },
+            limit: { type: ["number", "string"], description: "Max versions to return (default: 10)", default: 10 },
+          },
+          required: ["page_id"],
+        },
+      },
+
+      // 64. GET CURRENT USER
+      {
+        name: "quicktext-confluence_get_current_user",
+        description: "Get the profile of the currently authenticated Confluence user. Useful to verify connectivity and identity. Example: quicktext-confluence_get_current_user({})",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          required: [],
+        },
+      },
+
+      // 65. CREATE PAGE
+      {
+        name: "quicktext-confluence_create_page",
+        description: "Create a new Confluence page in a space. Body must be Confluence XHTML storage format (e.g., '<p>Hello world</p>'). Example: quicktext-confluence_create_page({space_key: 'DEV', title: 'My New Page', body: '<p>Content here</p>'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            space_key: { type: "string", description: "Space key where the page will be created" },
+            title: { type: "string", description: "Page title" },
+            body: { type: "string", description: "Page body in Confluence XHTML storage format (e.g., '<p>Hello</p>')" },
+            parent_id: { type: "string", description: "Optional parent page ID — creates the page as a child of this page" },
+          },
+          required: ["space_key", "title", "body"],
+        },
+      },
+
+      // 66. UPDATE PAGE
+      {
+        name: "quicktext-confluence_update_page",
+        description: "Update an existing Confluence page. Requires the current version number (get it from quicktext-confluence_get_page first). Body must be XHTML storage format. Example: quicktext-confluence_update_page({page_id: '123456', title: 'Updated Title', body: '<p>New content</p>', version: 3})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "ID of the page to update" },
+            title: { type: "string", description: "New page title" },
+            body: { type: "string", description: "New page body in Confluence XHTML storage format" },
+            version: { type: ["number", "string"], description: "Current version number of the page (required to prevent conflicts)" },
+            version_message: { type: "string", description: "Optional message describing what changed" },
+          },
+          required: ["page_id", "title", "body", "version"],
+        },
+      },
+
+      // 67. ADD PAGE COMMENT
+      {
+        name: "quicktext-confluence_add_page_comment",
+        description: "Add a comment to a Confluence page. Accepts plain text — it is automatically converted to storage format. Example: quicktext-confluence_add_page_comment({page_id: '123456', body: 'Great documentation!'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "ID of the page to comment on" },
+            body: { type: "string", description: "Comment text (plain text, automatically formatted)" },
+          },
+          required: ["page_id", "body"],
+        },
+      },
+
+      // 68. ADD PAGE LABEL
+      {
+        name: "quicktext-confluence_add_page_label",
+        description: "Add a label to a Confluence page. Example: quicktext-confluence_add_page_label({page_id: '123456', label: 'needs-review'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "ID of the page to label" },
+            label: { type: "string", description: "Label name to add (lowercase, no spaces)" },
+          },
+          required: ["page_id", "label"],
+        },
+      },
+
+      // 69. MOVE PAGE
+      {
+        name: "quicktext-confluence_move_page",
+        description: "Move a Confluence page to a different parent within the SAME space (e.g. reorganise the QUIC page tree). Cross-space moves are NOT supported by the Confluence Server REST API — those must be done via the UI (open page → ··· → Move). Example: quicktext-confluence_move_page({page_id: '123456', target_parent_id: '789012'})",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page_id: { type: "string", description: "ID of the page to move" },
+            target_space_key: { type: "string", description: "Target space key (required for cross-space moves, e.g. 'DEV')" },
+            target_parent_id: { type: "string", description: "Target parent page ID (omit to move to space root)" },
+          },
+          required: ["page_id"],
+        },
+      },
     ],
   };
 });
@@ -1487,7 +1805,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
 // Tool request handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const { name, arguments: args } = request.params;
+  const { name } = request.params;
+  const args = (request.params.arguments ?? {}) as Record<string, any>;
 
   try {
     switch (name) {
@@ -1524,13 +1843,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   created: data.fields.created,
                   updated: data.fields.updated,
                   description: data.renderedFields?.description || data.fields.description,
-                  comments: data.fields.comment?.comments?.map(c => ({
+                  comments: data.fields.comment?.comments?.map((c: any) => ({
                     author: c.author.displayName,
                     body: c.body,
                     created: c.created,
                   })) || [],
                   labels: data.fields.labels || [],
-                  components: data.fields.components?.map(c => c.name) || [],
+                  components: data.fields.components?.map((c: any) => c.name) || [],
                   story_points: data.fields.customfield_10023,
                   time_estimate: data.fields.timeestimate,
                   time_logged: data.fields.timespent,
@@ -1580,7 +1899,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 total: data.total,
                 returned: data.issues.length,
                 max_results,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -1590,7 +1909,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   created: issue.fields.created,
                   updated: issue.fields.updated,
                   labels: issue.fields.labels || [],
-                  components: issue.fields.components?.map(c => c.name) || [],
+                  components: issue.fields.components?.map((c: any) => c.name) || [],
                   story_points: issue.fields.customfield_10023,
                   assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
                   sprints: parseSprints(issue.fields.customfield_10008),
@@ -1610,8 +1929,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=assignee,status`
         );
 
-        const workload = {};
-        data.issues.forEach(issue => {
+        const workload: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const assignee = issue.fields.assignee?.displayName || "Unassigned";
           const status = issue.fields.status?.name || "Unknown";
           
@@ -1647,10 +1966,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,components,status,created`
         );
 
-        const byComponent = {};
-        data.issues.forEach(issue => {
-          const components = issue.fields.components?.map(c => c.name) || ["No Component"];
-          components.forEach(comp => {
+        const byComponent: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          const components = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
+          components.forEach((comp: any) => {
             if (!byComponent[comp]) {
               byComponent[comp] = { count: 0, issues: [] };
             }
@@ -1706,7 +2025,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 jql_query: jql,
                 total: data.total,
                 returned: data.issues.length,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -1733,8 +2052,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,timeestimate,customfield_10300`
         );
 
-        const totals = { Developer: 0, Tester: 0, Reviewer: 0 };
-        const tickets = data.issues.map(issue => {
+        const totals: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
+        const tickets = data.issues.map((issue: any) =>{
           const timeByRole = parseTimeLoggedByRole(issue.fields.customfield_10300);
           
           Object.keys(timeByRole).forEach(role => {
@@ -1783,7 +2102,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let unassignedDev = 0;
         let unassignedTest = 0;
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const roles = parseAssigneeRoles(issue.fields.customfield_10301);
           if (!roles.dev) unassignedDev++;
           if (!roles.test) unassignedTest++;
@@ -1820,7 +2139,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const results = {};
+        const results: Record<string, any> = {};
 
         for (const label of labels) {
           const jql = `project = "${project_key}" AND sprint in openSprints() AND labels = "${label}"`;
@@ -1828,8 +2147,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,summary`
           );
 
-          const statusBreakdown = {};
-          data.issues.forEach(issue => {
+          const statusBreakdown: Record<string, any> = {};
+          data.issues.forEach((issue: any) => {
             const status = issue.fields.status?.name || "Unknown";
             statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
           });
@@ -1837,7 +2156,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           results[label] = {
             count: data.total,
             status_breakdown: statusBreakdown,
-            issues: data.issues.map(i => ({ key: i.key, summary: i.fields.summary })),
+            issues: data.issues.map((i: any) => ({ key: i.key, summary: i.fields.summary })),
           };
         }
 
@@ -1880,15 +2199,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=labels`
         );
 
-        const labelCounts = {};
-        data.issues.forEach(issue => {
-          (issue.fields.labels || []).forEach(label => {
+        const labelCounts: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          (issue.fields.labels || []).forEach((label: any) => {
             labelCounts[label] = (labelCounts[label] || 0) + 1;
           });
         });
 
         const sortedLabels = Object.entries(labelCounts)
-          .sort((a, b) => b[1] - a[1])
+          .sort((a: any, b: any) => (b[1] as number) - (a[1] as number))
           .map(([label, count]) => ({ label, count }));
 
         return {
@@ -1914,15 +2233,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,created&expand=changelog`
         );
 
-        const statusTimes = {};
+        const statusTimes: Record<string, any> = {};
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const changelog = issue.changelog?.histories || [];
           let currentStatus = issue.fields.status?.name;
           let currentTime = new Date(issue.fields.created || issue.fields?.created).getTime();
 
-          changelog.forEach(history => {
-            const statusChange = history.items.find(item => item.field === "status");
+          changelog.forEach((history: any) => {
+            const statusChange = history.items.find((item: any) => item.field === "status");
             if (statusChange) {
               const changeTime = new Date(history.created).getTime();
               const duration = changeTime - currentTime;
@@ -1939,10 +2258,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         });
 
-        const averages = Object.entries(statusTimes).map(([status, data]) => ({
+        const averages = Object.entries(statusTimes).map(([status, statusData]: [string, any]) => ({
           status,
-          average_hours: (data.total_ms / data.count / 1000 / 3600).toFixed(2),
-          issue_count: data.count,
+          average_hours: (statusData.total_ms / statusData.count / 1000 / 3600).toFixed(2),
+          issue_count: statusData.count,
         }));
 
         return {
@@ -1970,7 +2289,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
           
           const sprintsMap = new Map();
-          data.issues.forEach(issue => {
+          data.issues.forEach((issue: any) => {
             const sprints = parseSprints(issue.fields.customfield_10008);
             sprints.forEach(sprint => {
               if (sprint && sprint.id && !sprintsMap.has(sprint.id)) {
@@ -2008,7 +2327,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                sprints: data.values.map(sprint => ({
+                sprints: data.values.map((sprint: any) =>({
                   id: sprint.id,
                   name: sprint.name,
                   state: sprint.state,
@@ -2416,7 +2735,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 epic_key,
                 total_children: data.total,
-                children: data.issues.map(issue => ({
+                children: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2442,7 +2761,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 issue_key,
-                available_transitions: data.transitions.map(t => ({
+                available_transitions: data.transitions.map((t: any) => ({
                   id: t.id,
                   name: t.name,
                   to_status: t.to?.name,
@@ -2458,8 +2777,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = await jiraRequest("/rest/api/2/field");
 
         const customFields = data
-          .filter(field => field.id.startsWith("customfield_"))
-          .map(field => ({
+          .filter((field: any) => field.id.startsWith("customfield_"))
+          .map((field: any) =>({
             id: field.id,
             name: field.name,
             type: field.schema?.type,
@@ -2490,7 +2809,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
-        const results = {};
+        const results: Record<string, any> = {};
 
         for (const name of assignee_names) {
           const jql = `project = "${project_key}" AND sprint in openSprints() AND assignee = "${name}"`;
@@ -2500,7 +2819,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           results[name] = {
             count: data.total,
-            issues: data.issues.map(i => ({
+            issues: data.issues.map((i: any) => ({
               key: i.key,
               summary: i.fields.summary,
               status: i.fields.status?.name,
@@ -2527,13 +2846,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status`
         );
 
-        const distribution = {};
-        data.issues.forEach(issue => {
+        const distribution: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const status = issue.fields.status?.name || "Unknown";
           distribution[status] = (distribution[status] || 0) + 1;
         });
 
-        const stats = Object.entries(distribution).map(([status, count]) => ({
+        const stats = Object.entries(distribution).map(([status, count]: [string, any]) => ({
           status,
           count,
           percentage: ((count / data.total) * 100).toFixed(2) + "%",
@@ -2562,19 +2881,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=reporter`
         );
 
-        const reporterCounts = {};
-        data.issues.forEach(issue => {
+        const reporterCounts: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const reporter = issue.fields.reporter?.displayName || "Unknown";
           reporterCounts[reporter] = (reporterCounts[reporter] || 0) + 1;
         });
 
         const stats = Object.entries(reporterCounts)
-          .map(([reporter, count]) => ({
+          .map(([reporter, count]: [string, any]) => ({
             reporter,
             count,
             percentage: ((count / data.total) * 100).toFixed(2) + "%",
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
         return {
           content: [
@@ -2597,7 +2916,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}`);
 
-        const links = (data.fields.issuelinks || []).map(link => {
+        const links = (data.fields.issuelinks || []).map((link: any) =>{
           if (link.outwardIssue) {
             return {
               type: link.type.outward,
@@ -2636,10 +2955,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}?expand=changelog`);
 
-        const history = (data.changelog?.histories || []).map(change => ({
+        const history = (data.changelog?.histories || []).map((change: any) =>({
           author: change.author.displayName,
           created: change.created,
-          changes: change.items.map(item => ({
+          changes: change.items.map((item: any) =>({
             field: item.field,
             from: item.fromString,
             to: item.toString,
@@ -2695,7 +3014,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 total_blocked: data.total,
-                blocked_issues: data.issues.map(issue => ({
+                blocked_issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2717,13 +3036,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=priority`
         );
 
-        const priorities = {};
-        data.issues.forEach(issue => {
+        const priorities: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
           const priority = issue.fields.priority?.name || "None";
           priorities[priority] = (priorities[priority] || 0) + 1;
         });
 
-        const breakdown = Object.entries(priorities).map(([priority, count]) => ({
+        const breakdown = Object.entries(priorities).map(([priority, count]: [string, any]) => ({
           priority,
           count,
           percentage: ((count / data.total) * 100).toFixed(2) + "%",
@@ -2752,21 +3071,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=components`
         );
 
-        const components = {};
-        data.issues.forEach(issue => {
-          const comps = issue.fields.components?.map(c => c.name) || ["No Component"];
-          comps.forEach(comp => {
+        const components: Record<string, any> = {};
+        data.issues.forEach((issue: any) => {
+          const comps = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
+          comps.forEach((comp: any) => {
             components[comp] = (components[comp] || 0) + 1;
           });
         });
 
         const breakdown = Object.entries(components)
-          .map(([component, count]) => ({
+          .map(([component, count]: [string, any]) => ({
             component,
             count,
             percentage: ((count / data.total) * 100).toFixed(2) + "%",
           }))
-          .sort((a, b) => b.count - a.count);
+          .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
         return {
           content: [
@@ -2803,7 +3122,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }),
             });
             results.push({ issue_key: key, success: true });
-          } catch (error) {
+          } catch (error: any) {
             results.push({ issue_key: key, success: false, error: error.error_message });
           }
         }
@@ -2859,7 +3178,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 total: data.total,
                 returned: data.issues.length,
-                issues: data.issues.map(issue => ({
+                issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
                   status: issue.fields.status?.name,
@@ -2909,7 +3228,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 total: data.values.length,
-                boards: data.values.map(b => ({
+                boards: data.values.map((b: any) => ({
                   id: b.id,
                   name: b.name,
                   type: b.type,
@@ -2940,7 +3259,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         let config = {};
         try {
           config = await jiraRequest(`/rest/agile/1.0/board/${board_id}/configuration`);
-        } catch (error) {
+        } catch (error: any) {
           // Configuration not available, continue without it
         }
         
@@ -2976,7 +3295,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Calculate duration metrics if dates are available
         let duration = null;
         if (data.startDate && data.endDate) {
-          const calendarDays = Math.ceil((new Date(data.endDate) - new Date(data.startDate)) / 86400000);
+          const calendarDays = Math.ceil((new Date(data.endDate).getTime() - new Date(data.startDate).getTime()) / 86400000);
           const workingDays = calculateWorkingDays(data.startDate, data.endDate);
           
           duration = {
@@ -3026,7 +3345,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const testerName = issue.fields.customfield_10018?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10705 ?? 0;
@@ -3086,7 +3405,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach(issue => {
+        data.issues.forEach((issue: any) => {
           const reviewerName = issue.fields.customfield_10020?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10806 ?? 0;
@@ -3868,15 +4187,533 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return { content: contentBlocks };
       }
 
+      // ─── Confluence Cases ──────────────────────────────────────────────────
+
+      // 54. SEARCH PAGES
+      case "quicktext-confluence_search_pages": {
+        const { cql, limit = 25, start = 0 } = args;
+        if (!cql) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "cql is required", {}, "Provide a CQL query, e.g. 'space=DEV AND type=page'");
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(String(cql))}&limit=${limit}&start=${start}&expand=space,version,history`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              total: data.totalSize,
+              returned: data.results?.length ?? 0,
+              cql_query: cql,
+              pages: (data.results ?? []).map((p: any) => ({
+                id: p.id,
+                title: p.title,
+                type: p.type,
+                space_key: p.space?.key,
+                space_name: p.space?.name,
+                version: p.version?.number,
+                last_updated: p.history?.lastUpdated?.when,
+                last_updated_by: p.history?.lastUpdated?.by?.displayName,
+                url: CONFLUENCE_BASE_URL + (p._links?.webui ?? ''),
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 55. GET PAGE
+      case "quicktext-confluence_get_page": {
+        const { page_id, include_body = true } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        const expand = include_body
+          ? "body.storage,version,space,history,history.lastUpdated,ancestors"
+          : "version,space,history,history.lastUpdated,ancestors";
+        const data = await confluenceRequest(`/rest/api/content/${page_id}?expand=${expand}`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page: {
+                id: data.id,
+                title: data.title,
+                type: data.type,
+                status: data.status,
+                space_key: data.space?.key,
+                space_name: data.space?.name,
+                version: data.version?.number,
+                created: data.history?.createdDate,
+                created_by: data.history?.createdBy?.displayName,
+                last_updated: data.history?.lastUpdated?.when,
+                last_updated_by: data.history?.lastUpdated?.by?.displayName,
+                parent: data.ancestors?.length ? { id: data.ancestors[data.ancestors.length - 1].id, title: data.ancestors[data.ancestors.length - 1].title } : null,
+                body: include_body ? extractConfluenceText(data.body?.storage?.value ?? '') : undefined,
+                url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 56. GET PAGE BY TITLE
+      case "quicktext-confluence_get_page_by_title": {
+        const { space_key, title } = args;
+        if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
+        if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
+        const cql = `space="${space_key}" AND title="${String(title).replace(/"/g, '\\"')}" AND type=page`;
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,version,space,history,ancestors&limit=5`);
+        if (!data.results?.length) {
+          return { content: [{ type: "text", text: JSON.stringify({ success: false, message: `No page found with title "${title}" in space ${space_key}` }, null, 2) }] };
+        }
+        const p = data.results[0];
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page: {
+                id: p.id,
+                title: p.title,
+                space_key: p.space?.key,
+                version: p.version?.number,
+                last_updated: p.history?.lastUpdated?.when,
+                last_updated_by: p.history?.lastUpdated?.by?.displayName,
+                parent: p.ancestors?.length ? { id: p.ancestors[p.ancestors.length - 1].id, title: p.ancestors[p.ancestors.length - 1].title } : null,
+                body: extractConfluenceText(p.body?.storage?.value ?? ''),
+                url: CONFLUENCE_BASE_URL + (p._links?.webui ?? ''),
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 57. GET CHILD PAGES
+      case "quicktext-confluence_get_child_pages": {
+        const { page_id, limit = 25 } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        const data = await confluenceRequest(`/rest/api/content/${page_id}/child/page?expand=version,space&limit=${limit}`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              parent_id: page_id,
+              total: data.size,
+              children: (data.results ?? []).map((p: any) => ({
+                id: p.id,
+                title: p.title,
+                version: p.version?.number,
+                space_key: p.space?.key,
+                url: CONFLUENCE_BASE_URL + (p._links?.webui ?? ''),
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 58. LIST SPACES
+      case "quicktext-confluence_list_spaces": {
+        const { limit = 50, type } = args;
+        const typeFilter = type ? `&type=${encodeURIComponent(String(type))}` : '';
+        const data = await confluenceRequest(`/rest/api/space?expand=description.plain&limit=${limit}${typeFilter}`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              total: data.size,
+              spaces: (data.results ?? []).map((s: any) => ({
+                key: s.key,
+                name: s.name,
+                type: s.type,
+                status: s.status,
+                description: s.description?.plain?.value ?? '',
+                url: CONFLUENCE_BASE_URL + (s._links?.webui ?? ''),
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 59. GET SPACE
+      case "quicktext-confluence_get_space": {
+        const { space_key } = args;
+        if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
+        const data = await confluenceRequest(`/rest/api/space/${space_key}?expand=description.plain,homepage`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              space: {
+                key: data.key,
+                name: data.name,
+                type: data.type,
+                status: data.status,
+                description: data.description?.plain?.value ?? '',
+                homepage_id: data.homepage?.id,
+                homepage_title: data.homepage?.title,
+                url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 60. GET PAGE LABELS
+      case "quicktext-confluence_get_page_labels": {
+        const { page_id } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        const data = await confluenceRequest(`/rest/api/content/${page_id}/label`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id,
+              labels: (data.results ?? []).map((l: any) => ({ name: l.name, prefix: l.prefix })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 61. SEARCH BY LABEL
+      case "quicktext-confluence_search_by_label": {
+        const { label, space_key, limit = 25 } = args;
+        if (!label) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "label is required");
+        const spaceFilter = space_key ? ` AND space="${space_key}"` : '';
+        const cql = `label="${label}" AND type=page${spaceFilter}`;
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=space,version,history`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              label,
+              total: data.totalSize,
+              returned: data.results?.length ?? 0,
+              pages: (data.results ?? []).map((p: any) => ({
+                id: p.id,
+                title: p.title,
+                space_key: p.space?.key,
+                version: p.version?.number,
+                last_updated: p.history?.lastUpdated?.when,
+                url: CONFLUENCE_BASE_URL + (p._links?.webui ?? ''),
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 62. GET PAGE COMMENTS
+      case "quicktext-confluence_get_page_comments": {
+        const { page_id, limit = 50 } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        const data = await confluenceRequest(`/rest/api/content/${page_id}/child/comment?expand=body.storage,version,history&limit=${limit}`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id,
+              total: data.size,
+              comments: (data.results ?? []).map((c: any) => ({
+                id: c.id,
+                body: extractConfluenceText(c.body?.storage?.value ?? ''),
+                author: c.history?.createdBy?.displayName,
+                created: c.history?.createdDate,
+                last_updated: c.version?.when,
+              })),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 63. GET PAGE HISTORY
+      case "quicktext-confluence_get_page_history": {
+        const { page_id, limit = 10 } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+
+        // Try /version endpoint first (Confluence Cloud + some DC versions)
+        // Fall back to /history endpoint (Confluence Server 7.x)
+        let versions: any[] = [];
+        let source = "version";
+        try {
+          const data = await confluenceRequest(`/rest/api/content/${page_id}/version?limit=${limit}`);
+          versions = (data.results ?? []).map((v: any) => ({
+            version: v.number,
+            message: v.message ?? '',
+            minor_edit: v.minorEdit,
+            when: v.when,
+            author: v.by?.displayName,
+          }));
+        } catch (versionErr: any) {
+          if (versionErr.error_code === ConfluenceErrorCodes.PAGE_NOT_FOUND) {
+            // /version endpoint not available — fall back to /history
+            source = "history";
+            const hist = await confluenceRequest(
+              `/rest/api/content/${page_id}?expand=version,history,history.previousVersion,history.lastUpdated`
+            );
+            // Build a version list from what the history endpoint gives us
+            const current = hist.version;
+            const lastUpdated = hist.history?.lastUpdated;
+            const created = hist.history;
+            if (current) {
+              versions.push({
+                version: current.number,
+                message: current.message ?? '',
+                minor_edit: current.minorEdit ?? false,
+                when: lastUpdated?.when ?? null,
+                author: lastUpdated?.by?.displayName ?? created?.createdBy?.displayName,
+              });
+            }
+            if (created && current?.number > 1) {
+              versions.push({
+                version: 1,
+                message: '',
+                minor_edit: false,
+                when: created.createdDate,
+                author: created.createdBy?.displayName,
+              });
+            }
+          } else {
+            throw versionErr;
+          }
+        }
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id,
+              source,
+              note: source === "history"
+                ? "Full version list unavailable on this Confluence Server version — showing current and initial versions only"
+                : undefined,
+              versions,
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 64. GET CURRENT USER
+      case "quicktext-confluence_get_current_user": {
+        const data = await confluenceRequest(`/rest/api/user/current`);
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              user: {
+                username: data.username,
+                display_name: data.displayName,
+                user_key: data.userKey,
+                status: data.status,
+                confluence_url: CONFLUENCE_BASE_URL,
+              },
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 65. CREATE PAGE
+      case "quicktext-confluence_create_page": {
+        const { space_key, title, body, parent_id } = args;
+        if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
+        if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
+        if (!body) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "body is required");
+
+        const payload: any = {
+          type: "page",
+          title: String(title),
+          space: { key: String(space_key) },
+          body: { storage: { value: String(body), representation: "storage" } },
+        };
+        if (parent_id) payload.ancestors = [{ id: String(parent_id) }];
+
+        const data = await confluenceRequest(`/rest/api/content`, {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id: data.id,
+              title: data.title,
+              version: data.version?.number,
+              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 66. UPDATE PAGE
+      case "quicktext-confluence_update_page": {
+        const { page_id, title, body, version, version_message } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
+        if (!body) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "body is required");
+        if (!version) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "version is required — get it from quicktext-confluence_get_page first");
+
+        const payload: any = {
+          id: String(page_id),
+          type: "page",
+          title: String(title),
+          version: { number: Number(version), ...(version_message ? { message: String(version_message) } : {}) },
+          body: { storage: { value: String(body), representation: "storage" } },
+        };
+
+        const data = await confluenceRequest(`/rest/api/content/${page_id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id: data.id,
+              title: data.title,
+              version: data.version?.number,
+              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 67. ADD PAGE COMMENT
+      case "quicktext-confluence_add_page_comment": {
+        const { page_id, body } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        if (!body) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "body is required");
+
+        const data = await confluenceRequest(`/rest/api/content`, {
+          method: "POST",
+          body: JSON.stringify({
+            type: "comment",
+            container: { id: String(page_id), type: "page" },
+            body: { storage: { value: toConfluenceStorage(String(body)), representation: "storage" } },
+          }),
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              comment_id: data.id,
+              page_id,
+              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+            }, null, 2),
+          }],
+        };
+      }
+
+      // 68. ADD PAGE LABEL
+      case "quicktext-confluence_add_page_label": {
+        const { page_id, label } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        if (!label) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "label is required");
+
+        const data = await confluenceRequest(`/rest/api/content/${page_id}/label`, {
+          method: "POST",
+          body: JSON.stringify([{ prefix: "global", name: String(label).toLowerCase().replace(/\s+/g, '-') }]),
+        });
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id,
+              labels: (data.results ?? []).map((l: any) => l.name),
+            }, null, 2),
+          }],
+        };
+      }
+
       default:
+      // 69. MOVE PAGE
+      case "quicktext-confluence_move_page": {
+        const { page_id, target_space_key, target_parent_id } = args;
+        if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
+        if (!target_space_key && !target_parent_id) {
+          throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "Provide at least target_space_key or target_parent_id");
+        }
+
+        // Fetch current page to determine current space and get required fields for PUT
+        const current = await confluenceRequest(
+          `/rest/api/content/${page_id}?expand=body.storage,version,space,ancestors`
+        );
+
+        const currentSpaceKey = current.space?.key;
+        const isCrossSpaceMove = target_space_key && target_space_key !== currentSpaceKey;
+
+        if (isCrossSpaceMove) {
+          // Confluence Server 7.x does not support cross-space moves via REST API.
+          // The /move endpoint is Cloud-only (404 on Server).
+          // The PUT /rest/api/content/{id} space change returns 403 on Server.
+          // Cross-space moves must be done via the Confluence UI:
+          //   Space Tools → Content Tools → Reorder Pages, or drag in page tree.
+          throw createError(
+            ConfluenceErrorCodes.FORBIDDEN,
+            `Cross-space moves are not supported by the Confluence Server REST API. Cannot move page from space '${currentSpaceKey}' to '${target_space_key}' via API.`,
+            {
+              page_id,
+              current_space: currentSpaceKey,
+              target_space: target_space_key,
+              workaround: "Ask the page owner or a Confluence admin to move it via the UI: open the page → ··· menu → Move, or use Space Tools → Reorder Pages",
+            },
+            "Use the Confluence UI to perform cross-space moves: open the page → click ··· → Move"
+          );
+        }
+
+        // Same-space parent change — use PUT with updated ancestors
+        const newVersion = (current.version?.number ?? 1) + 1;
+        const payload: any = {
+          id: String(page_id),
+          type: "page",
+          title: current.title,
+          version: { number: newVersion },
+          space: { key: currentSpaceKey },
+          body: current.body,
+        };
+
+        if (target_parent_id) {
+          payload.ancestors = [{ id: String(target_parent_id) }];
+        } else {
+          // Keep existing parent
+          if (current.ancestors?.length) {
+            payload.ancestors = [{ id: current.ancestors[current.ancestors.length - 1].id }];
+          }
+        }
+
+        const data = await confluenceRequest(`/rest/api/content/${page_id}`, {
+          method: "PUT",
+          body: JSON.stringify(payload),
+        });
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              page_id: data.id,
+              title: data.title,
+              space: data.space?.key,
+              new_version: data.version?.number,
+              url: CONFLUENCE_BASE_URL + (data._links?.webui ?? ''),
+            }, null, 2),
+          }],
+        };
+      }
+
         throw createError(
           ErrorCodes.INVALID_PARAMETER,
           `Unknown tool: ${name}`,
           { tool_name: name },
-          "Check tool name spelling and ensure it starts with quicktext-jira_"
+          "Check tool name spelling. Tools start with quicktext-jira_ or quicktext-confluence_"
         );
     }
-  } catch (error) {
+  } catch (error: any) {
     // If it's already a structured error, return it as-is
     if (error.error_code) {
       return {
@@ -3915,7 +4752,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("QuickText Jira MCP Server v4.1 running on stdio");
+  console.error(`QuickText Jira+Confluence MCP Server v5.0.0 running on stdio (Confluence: ${confluenceEnabled ? 'enabled' : 'disabled — set CONFLUENCE_BASE_URL + CONFLUENCE_API_TOKEN'})`);
 }
 
 main().catch((error) => {
