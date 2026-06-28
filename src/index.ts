@@ -23,17 +23,22 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 // Jira configuration — read from environment variables (set via .env or MCP client config)
-const JIRA_BASE_URL = process.env.JIRA_BASE_URL ?? '';
+const JIRA_BASE_URL = (process.env.JIRA_BASE_URL ?? '').replace(/\/$/, '');
 const JIRA_PAT = process.env.JIRA_API_TOKEN ?? '';
-const JIRA_AUTH_TYPE = process.env.JIRA_AUTH_TYPE ?? 'bearer';
+const JIRA_AUTH_TYPE = (process.env.JIRA_AUTH_TYPE ?? 'bearer').toLowerCase();
 const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL ?? '';
 
 // Confluence configuration (optional — tools are disabled if not set)
 const CONFLUENCE_BASE_URL = (process.env.CONFLUENCE_BASE_URL ?? '').replace(/\/$/, '');
 const CONFLUENCE_API_TOKEN = process.env.CONFLUENCE_API_TOKEN ?? '';
-const CONFLUENCE_AUTH_TYPE = process.env.CONFLUENCE_AUTH_TYPE ?? 'bearer';
+const CONFLUENCE_AUTH_TYPE = (process.env.CONFLUENCE_AUTH_TYPE ?? 'bearer').toLowerCase();
 const CONFLUENCE_USER_EMAIL = process.env.CONFLUENCE_USER_EMAIL ?? '';
 const confluenceEnabled = Boolean(CONFLUENCE_BASE_URL && CONFLUENCE_API_TOKEN);
+
+// Network timeout for all upstream requests (configurable)
+const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) > 0
+  ? Number(process.env.REQUEST_TIMEOUT_MS)
+  : 30000;
 
 if (!JIRA_BASE_URL || !JIRA_PAT) {
   console.error('ERROR: Missing required environment variables.');
@@ -41,6 +46,19 @@ if (!JIRA_BASE_URL || !JIRA_PAT) {
   console.error('  Copy .env.example to .env and fill in your values,');
   console.error('  or set them in your MCP client configuration (claude_desktop_config.json).');
   process.exit(1);
+}
+
+// Basic auth requires a user email to form the Basic credential
+if (JIRA_AUTH_TYPE === 'basic' && !JIRA_USER_EMAIL) {
+  console.error('ERROR: JIRA_USER_EMAIL is required when JIRA_AUTH_TYPE=basic.');
+  process.exit(1);
+}
+if (confluenceEnabled && CONFLUENCE_AUTH_TYPE === 'basic' && !CONFLUENCE_USER_EMAIL) {
+  console.error('ERROR: CONFLUENCE_USER_EMAIL is required when CONFLUENCE_AUTH_TYPE=basic.');
+  process.exit(1);
+}
+if (JIRA_AUTH_TYPE !== 'basic' && JIRA_AUTH_TYPE !== 'bearer') {
+  console.error(`WARNING: unknown JIRA_AUTH_TYPE "${JIRA_AUTH_TYPE}"; expected "bearer" or "basic". Falling back to bearer.`);
 }
 
 // Error codes (JIRA_1xxx-5xxx)
@@ -91,6 +109,37 @@ let rateLimitInfo: { remaining: number | null; limit: number | null; reset: stri
   reset: null,
 };
 
+// Auth header builders (single source of truth — used by jiraRequest/confluenceRequest)
+function jiraAuthHeader(): string {
+  return JIRA_AUTH_TYPE === 'basic'
+    ? `Basic ${Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_PAT}`).toString('base64')}`
+    : `Bearer ${JIRA_PAT}`;
+}
+function confluenceAuthHeader(): string {
+  return CONFLUENCE_AUTH_TYPE === 'basic'
+    ? `Basic ${Buffer.from(`${CONFLUENCE_USER_EMAIL}:${CONFLUENCE_API_TOKEN}`).toString('base64')}`
+    : `Bearer ${CONFLUENCE_API_TOKEN}`;
+}
+
+// Escape a user-supplied value before interpolating it into a quoted JQL/CQL string literal.
+// Prevents query breakout on values containing backslashes or double quotes.
+function escapeJqlValue(value: string): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+const escapeCqlValue = escapeJqlValue;
+
+// Shared MIME constants for attachment rendering (single source of truth)
+const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+const TEXT_MIME_PREFIXES = ["text/"];
+const TEXT_MIME_EXACT = ["application/json", "application/xml"];
+const TEXT_SIZE_LIMIT = 500 * 1024;
+
+// Jira issue key shape, e.g. QT-123 (used to validate before interpolating into URLs)
+const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9_]+-\d+$/;
+function isValidIssueKey(key: any): boolean {
+  return typeof key === "string" && ISSUE_KEY_RE.test(key);
+}
+
 // Create server
 const server = new Server(
   {
@@ -118,26 +167,29 @@ function createError(code: string, message: string, details: Record<string, any>
 // Jira API helper with rate limit tracking and error handling
 async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
   const url = `${JIRA_BASE_URL}${endpoint}`;
-  
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       ...options,
+      signal: ctrl.signal,
       headers: {
-        "Authorization": JIRA_AUTH_TYPE === 'basic'
-          ? `Basic ${Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_PAT}`).toString('base64')}`
-          : `Bearer ${JIRA_PAT}`,
+        "Authorization": jiraAuthHeader(),
         "Content-Type": "application/json",
         "Accept": "application/json",
         ...options.headers,
       },
     });
 
-    // Track rate limits
+    // Track rate limits (ignore non-numeric/absent headers)
     if (response.headers.has("X-RateLimit-Remaining")) {
-      rateLimitInfo.remaining = parseInt(response.headers.get("X-RateLimit-Remaining") ?? "");
+      const n = parseInt(response.headers.get("X-RateLimit-Remaining") ?? "", 10);
+      if (Number.isFinite(n)) rateLimitInfo.remaining = n;
     }
     if (response.headers.has("X-RateLimit-Limit")) {
-      rateLimitInfo.limit = parseInt(response.headers.get("X-RateLimit-Limit") ?? "");
+      const n = parseInt(response.headers.get("X-RateLimit-Limit") ?? "", 10);
+      if (Number.isFinite(n)) rateLimitInfo.limit = n;
     }
     if (response.headers.has("X-RateLimit-Reset")) {
       rateLimitInfo.reset = response.headers.get("X-RateLimit-Reset");
@@ -159,18 +211,24 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
           "Check user permissions for this resource"
         );
       } else if (response.status === 404) {
+        // Map 404 to the most specific resource error based on the endpoint
+        const notFoundCode = /\/project/.test(endpoint)
+          ? ErrorCodes.PROJECT_NOT_FOUND
+          : /\/(sprint|board)/.test(endpoint)
+            ? ErrorCodes.SPRINT_NOT_FOUND
+            : ErrorCodes.ISSUE_NOT_FOUND;
         throw createError(
-          ErrorCodes.ISSUE_NOT_FOUND,
+          notFoundCode,
           "Resource not found",
           { status: response.status, endpoint },
-          "Verify issue key, project key, or sprint name is correct"
+          "Verify issue key, project key, or sprint/board id is correct"
         );
       } else if (response.status === 429) {
         throw createError(
           ErrorCodes.RATE_LIMIT_EXCEEDED,
           "Rate limit exceeded",
-          { status: response.status, rate_limit: rateLimitInfo },
-          "Wait before retrying. Check X-RateLimit-Reset header"
+          { status: response.status, rate_limit: rateLimitInfo, retry_after: response.headers.get("Retry-After") },
+          "Wait before retrying. Check the Retry-After / X-RateLimit-Reset header"
         );
       } else {
         // Capture the raw error body for diagnosis
@@ -189,18 +247,43 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
 
     // Handle empty responses (e.g. Jira 204 No Content on transitions)
     const text = await response.text();
-    return text ? JSON.parse(text) : {};
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      // A 200 with a non-JSON body usually means an SSO/proxy login page was returned
+      throw createError(
+        ErrorCodes.JIRA_API_ERROR,
+        "Expected JSON but received a non-JSON response (possible SSO/proxy login page)",
+        {
+          status: response.status,
+          endpoint,
+          content_type: response.headers.get("Content-Type"),
+          body_preview: text.slice(0, 200),
+        },
+        "Verify JIRA_BASE_URL points directly at the API and the PAT bypasses any SSO portal"
+      );
+    }
   } catch (error: any) {
     if (error.error_code) {
       throw error; // Already a structured error
     }
-    
+    if (error.name === "AbortError") {
+      throw createError(
+        ErrorCodes.TIMEOUT,
+        `Request timed out after ${REQUEST_TIMEOUT_MS}ms`,
+        { endpoint, timeout_ms: REQUEST_TIMEOUT_MS },
+        "Increase REQUEST_TIMEOUT_MS or check Jira server responsiveness"
+      );
+    }
     throw createError(
       ErrorCodes.NETWORK_ERROR,
       `Network error: ${error.message}`,
       { endpoint, original_error: error.message },
       "Check network connectivity and Jira server status"
     );
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -217,13 +300,14 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
 
   const url = `${CONFLUENCE_BASE_URL}${endpoint}`;
 
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, {
       ...options,
+      signal: ctrl.signal,
       headers: {
-        "Authorization": CONFLUENCE_AUTH_TYPE === 'basic'
-          ? `Basic ${Buffer.from(`${CONFLUENCE_USER_EMAIL}:${CONFLUENCE_API_TOKEN}`).toString('base64')}`
-          : `Bearer ${CONFLUENCE_API_TOKEN}`,
+        "Authorization": confluenceAuthHeader(),
         "Content-Type": "application/json",
         "Accept": "application/json",
         ...options.headers,
@@ -246,18 +330,63 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
       } else if (response.status === 409) {
         throw createError(ConfluenceErrorCodes.API_ERROR, "Version conflict: the page was updated since you fetched it", { status: 409 }, "Fetch the page again with quicktext-confluence_get_page to get the latest version number, then retry");
       } else if (response.status === 429) {
-        throw createError(ConfluenceErrorCodes.RATE_LIMIT, "Confluence rate limit exceeded", { status: 429 }, "Wait before retrying");
+        throw createError(ConfluenceErrorCodes.RATE_LIMIT, "Confluence rate limit exceeded", { status: 429, retry_after: response.headers.get("Retry-After") }, "Wait before retrying");
       } else {
         throw createError(ConfluenceErrorCodes.API_ERROR, `Confluence API error: ${response.status} ${response.statusText}`, { status: response.status, endpoint, response_body: errorBody });
       }
     }
 
     const text = await response.text();
-    return text ? JSON.parse(text) : {};
+    if (!text) return {};
+    try {
+      return JSON.parse(text);
+    } catch (_) {
+      throw createError(
+        ConfluenceErrorCodes.API_ERROR,
+        "Expected JSON but received a non-JSON response (possible SSO/proxy login page)",
+        { status: response.status, endpoint, content_type: response.headers.get("Content-Type"), body_preview: text.slice(0, 200) },
+        "Verify CONFLUENCE_BASE_URL points directly at the API and the token bypasses any SSO portal"
+      );
+    }
   } catch (error: any) {
     if (error.error_code) throw error;
+    if (error.name === "AbortError") {
+      throw createError(ConfluenceErrorCodes.NETWORK_ERROR, `Confluence request timed out after ${REQUEST_TIMEOUT_MS}ms`, { endpoint, timeout_ms: REQUEST_TIMEOUT_MS }, "Increase REQUEST_TIMEOUT_MS or check Confluence server responsiveness");
+    }
     throw createError(ConfluenceErrorCodes.NETWORK_ERROR, `Network error: ${error.message}`, { endpoint, original_error: error.message }, "Check network connectivity and Confluence server status");
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+// Fetch ALL issues matching a JQL query by paginating /rest/api/2/search.
+// Bounded by hardCap to avoid runaway cost on very large result sets.
+// Returns the gathered issues, the server-reported total, and whether the
+// gathered set is incomplete (hardCap reached before all pages fetched).
+async function searchAllIssues(
+  jql: string,
+  fields: string,
+  opts: { hardCap?: number; pageSize?: number; expand?: string } = {}
+): Promise<{ issues: any[]; total: number; truncated: boolean }> {
+  const hardCap = opts.hardCap ?? 5000;
+  const pageSize = Math.min(opts.pageSize ?? 100, 100);
+  const expandParam = opts.expand ? `&expand=${encodeURIComponent(opts.expand)}` : "";
+  let startAt = 0;
+  let total = 0;
+  const issues: any[] = [];
+  // Hard ceiling on iterations as a belt-and-suspenders guard against a server
+  // that never advances (page.length === 0 also breaks the loop).
+  for (let i = 0; i < 1000; i++) {
+    const data = await jiraRequest(
+      `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${pageSize}&startAt=${startAt}&fields=${fields}${expandParam}`
+    );
+    total = data.total ?? 0;
+    const page = data.issues ?? [];
+    issues.push(...page);
+    startAt += page.length;
+    if (page.length === 0 || startAt >= total || issues.length >= hardCap) break;
+  }
+  return { issues, total, truncated: issues.length < total };
 }
 
 // Strip XHTML tags from Confluence storage format to get plain text
@@ -837,7 +966,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       // 16. ADD COMMENT
       {
         name: "quicktext-jira_add_comment",
-        description: "Add comment to issue. Supports markdown formatting. Returns comment ID. Example: quicktext-jira_add_comment({issue_key: 'QT-123', body: 'This is fixed now'})",
+        description: "Add comment to issue. The body is sent verbatim as Jira Server/DC wiki markup (e.g. *bold*, {code}…{code}); plain text works as-is. Returns comment ID. Example: quicktext-jira_add_comment({issue_key: 'QT-123', body: 'This is fixed now'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -847,7 +976,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             },
             body: {
               type: "string",
-              description: "Comment text (supports markdown)",
+              description: "Comment text, sent as Jira wiki markup (not Markdown)",
             },
           },
           required: ["issue_key", "body"],
@@ -857,7 +986,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       // 17. ADD ATTACHMENT
       {
         name: "quicktext-jira_add_attachment",
-        description: "Add file attachment to issue. Requires file path or base64 content. Example: quicktext-jira_add_attachment({issue_key: 'QT-123', filename: 'screenshot.png', content_base64: '...'})",
+        description: "Add a file attachment to an issue from base64-encoded content. Example: quicktext-jira_add_attachment({issue_key: 'QT-123', filename: 'screenshot.png', content_base64: '...'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1877,13 +2006,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 2. SEARCH SPRINT ISSUES
       case "quicktext-jira_search_sprint_issues": {
         const { project_key, sprint_name, max_results = 500 } = args;
-        
-        let jql = `project = "${project_key}" AND sprint in openSprints()`;
-        
+
+        const escProject = escapeJqlValue(project_key);
+        let jql = `project = "${escProject}" AND sprint in openSprints()`;
+
         if (sprint_name) {
-          jql = `project = "${project_key}" AND sprint = "${sprint_name}"`;
+          jql = `project = "${escProject}" AND sprint = "${escapeJqlValue(sprint_name)}"`;
         }
-        
+
         jql += " ORDER BY created DESC";
 
         const data = await jiraRequest(
@@ -1898,6 +2028,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 total: data.total,
                 returned: data.issues.length,
+                truncated: data.total > data.issues.length,
                 max_results,
                 issues: data.issues.map((issue: any) =>({
                   key: issue.key,
@@ -1924,20 +2055,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_team_workload": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints() ORDER BY assignee ASC`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=assignee,status`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() ORDER BY assignee ASC`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "assignee,status");
 
         const workload: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const assignee = issue.fields.assignee?.displayName || "Unassigned";
           const status = issue.fields.status?.name || "Unknown";
-          
+
           if (!workload[assignee]) {
             workload[assignee] = { total: 0, by_status: {} };
           }
-          
+
           workload[assignee].total++;
           workload[assignee].by_status[status] = (workload[assignee].by_status[status] || 0) + 1;
         });
@@ -1948,7 +2077,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 team_members: Object.keys(workload).length,
                 workload,
               }, null, 2),
@@ -1961,13 +2092,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_analyze_hotfixes": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints() AND (summary ~ "HOTFIX" OR summary ~ "HTOFIX") ORDER BY created DESC`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,components,status,created`
-        );
+        const escProject = escapeJqlValue(project_key);
+        const jql = `project = "${escProject}" AND sprint in openSprints() AND (summary ~ "HOTFIX" OR summary ~ "HTOFIX") ORDER BY created DESC`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "summary,components,status,created");
 
         const byComponent: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const components = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
           components.forEach((comp: any) => {
             if (!byComponent[comp]) {
@@ -1982,17 +2112,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           });
         });
 
+        const sprintTotal = (await jiraRequest(
+          `/rest/api/2/search?jql=${encodeURIComponent(`project = "${escProject}" AND sprint in openSprints()`)}&maxResults=0`
+        )).total;
+
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_hotfixes: data.total,
+                total_hotfixes: total,
+                gathered: issues.length,
+                truncated,
                 by_component: byComponent,
-                hotfix_ratio: (data.total / (await jiraRequest(
-                  `/rest/api/2/search?jql=${encodeURIComponent(`project = "${project_key}" AND sprint in openSprints()`)}&maxResults=0`
-                )).total * 100).toFixed(2) + "%",
+                hotfix_ratio: (sprintTotal ? (total / sprintTotal * 100) : 0).toFixed(2) + "%",
               }, null, 2),
             },
           ],
@@ -2047,13 +2181,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_time_metrics": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=summary,timeestimate,customfield_10300`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "summary,timeestimate,customfield_10300");
 
         const totals: Record<string, number> = { Developer: 0, Tester: 0, Reviewer: 0 };
-        const tickets = data.issues.map((issue: any) =>{
+        const tickets = issues.map((issue: any) =>{
           const timeByRole = parseTimeLoggedByRole(issue.fields.customfield_10300);
           
           Object.keys(timeByRole).forEach(role => {
@@ -2078,6 +2210,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 sprint_totals: {
                   Developer: (totals.Developer / 3600).toFixed(2) + "h",
                   Tester: (totals.Tester / 3600).toFixed(2) + "h",
@@ -2094,32 +2229,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_unassigned_by_role": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=customfield_10301`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "customfield_10301");
 
         let unassignedDev = 0;
         let unassignedTest = 0;
 
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const roles = parseAssigneeRoles(issue.fields.customfield_10301);
           if (!roles.dev) unassignedDev++;
           if (!roles.test) unassignedTest++;
         });
 
+        const pop = issues.length || 1;
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 unassigned_developer: unassignedDev,
                 unassigned_tester: unassignedTest,
                 unassigned_percentage: {
-                  developer: ((unassignedDev / data.total) * 100).toFixed(2) + "%",
-                  tester: ((unassignedTest / data.total) * 100).toFixed(2) + "%",
+                  developer: ((unassignedDev / pop) * 100).toFixed(2) + "%",
+                  tester: ((unassignedTest / pop) * 100).toFixed(2) + "%",
                 },
               }, null, 2),
             },
@@ -2142,21 +2278,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results: Record<string, any> = {};
 
         for (const label of labels) {
-          const jql = `project = "${project_key}" AND sprint in openSprints() AND labels = "${label}"`;
-          const data = await jiraRequest(
-            `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,summary`
-          );
+          const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() AND labels = "${escapeJqlValue(label)}"`;
+          const { issues, total, truncated } = await searchAllIssues(jql, "status,summary");
 
           const statusBreakdown: Record<string, any> = {};
-          data.issues.forEach((issue: any) => {
+          issues.forEach((issue: any) => {
             const status = issue.fields.status?.name || "Unknown";
             statusBreakdown[status] = (statusBreakdown[status] || 0) + 1;
           });
 
           results[label] = {
-            count: data.total,
+            count: total,
+            gathered: issues.length,
+            truncated,
             status_breakdown: statusBreakdown,
-            issues: data.issues.map((i: any) => ({ key: i.key, summary: i.fields.summary })),
+            issues: issues.map((i: any) => ({ key: i.key, summary: i.fields.summary })),
           };
         }
 
@@ -2194,13 +2330,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_all_labels": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}"`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=labels`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}"`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "labels");
 
         const labelCounts: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           (issue.fields.labels || []).forEach((label: any) => {
             labelCounts[label] = (labelCounts[label] || 0) + 1;
           });
@@ -2217,6 +2351,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 total_unique_labels: sortedLabels.length,
+                issues_scanned: issues.length,
+                total_matched: total,
+                truncated,
                 labels: sortedLabels,
               }, null, 2),
             },
@@ -2228,14 +2365,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_time_in_status": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,created&expand=changelog`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "status,created", { expand: "changelog" });
 
         const statusTimes: Record<string, any> = {};
 
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const changelog = issue.changelog?.histories || [];
           let currentStatus = issue.fields.status?.name;
           let currentTime = new Date(issue.fields.created || issue.fields?.created).getTime();
@@ -2270,6 +2405,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
+                issues_scanned: issues.length,
+                total_matched: total,
+                truncated,
                 averages,
               }, null, 2),
             },
@@ -2282,14 +2420,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { project_key, board_id } = args;
         
         if (!board_id) {
-          // Fallback: Extract sprint info from issues when board_id is not provided
-          const jql = `project = "${project_key}" AND sprint in openSprints()`;
-          const data = await jiraRequest(
-            `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1&fields=customfield_10008`
-          );
-          
+          // Fallback: Extract sprint info from issues when board_id is not provided.
+          // Scan a sizable sample (not just one issue) so all open sprints surface;
+          // dedup by sprint id below. This is a best-effort sampled list — pass
+          // board_id for an authoritative sprint enumeration via the Agile API.
+          const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+          const { issues } = await searchAllIssues(jql, "customfield_10008", { hardCap: 500 });
+
           const sprintsMap = new Map();
-          data.issues.forEach((issue: any) => {
+          issues.forEach((issue: any) => {
             const sprints = parseSprints(issue.fields.customfield_10008);
             sprints.forEach(sprint => {
               if (sprint && sprint.id && !sprintsMap.has(sprint.id)) {
@@ -2304,7 +2443,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               }
             });
           });
-          
+
           return {
             content: [
               {
@@ -2312,6 +2451,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 text: JSON.stringify({
                   success: true,
                   source: "extracted_from_issues",
+                  note: "Sampled from up to 500 open-sprint issues; pass board_id for an authoritative list.",
                   sprints: Array.from(sprintsMap.values()),
                 }, null, 2),
               },
@@ -2352,6 +2492,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           time_estimate_seconds,
         } = args;
 
+        if (!project_key) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "project_key is required");
+        }
         if (!summary) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "summary is required");
         }
@@ -2474,6 +2617,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
         if (warnings.length > 0) {
           createResult.warnings = warnings;
+          // The issue was created but one or more secondary fields failed to apply.
+          createResult.partial_success = true;
         }
 
         return {
@@ -2485,6 +2630,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_update_issue": {
         const { issue_key, fields } = args;
 
+        if (!isValidIssueKey(issue_key)) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required and must look like 'PROJ-123'");
+        }
         if (!fields || Object.keys(fields).length === 0) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
@@ -2587,7 +2735,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 15. TRANSITION ISSUE
       case "quicktext-jira_transition_issue": {
         const { issue_key, transition_id } = args;
-        
+
+        if (!isValidIssueKey(issue_key)) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required and must look like 'PROJ-123'");
+        }
         if (!transition_id) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
@@ -2620,7 +2771,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 16. ADD COMMENT
       case "quicktext-jira_add_comment": {
         const { issue_key, body } = args;
-        
+
+        if (!isValidIssueKey(issue_key)) {
+          throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required and must look like 'PROJ-123'");
+        }
         if (!body) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
@@ -2640,7 +2794,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 comment_id: data.id,
-                author: data.author.displayName,
+                author: data.author?.displayName ?? null,
                 created: data.created,
               }, null, 2),
             },
@@ -2721,8 +2875,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // 18. GET EPIC CHILDREN
       case "quicktext-jira_get_epic_children": {
         const { epic_key, max_results = 100 } = args;
-        
-        const jql = `"Epic Link" = ${epic_key}`;
+
+        const jql = `"Epic Link" = "${escapeJqlValue(epic_key)}"`;
         const data = await jiraRequest(
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${max_results}&fields=summary,status,assignee,customfield_10023`
         );
@@ -2735,6 +2889,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 epic_key,
                 total_children: data.total,
+                returned: data.issues.length,
+                truncated: data.total > data.issues.length,
                 children: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
@@ -2812,13 +2968,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results: Record<string, any> = {};
 
         for (const name of assignee_names) {
-          const jql = `project = "${project_key}" AND sprint in openSprints() AND assignee = "${name}"`;
+          const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() AND assignee = "${escapeJqlValue(name)}"`;
           const data = await jiraRequest(
             `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=500&fields=summary,status`
           );
 
           results[name] = {
             count: data.total,
+            returned: data.issues.length,
+            truncated: data.total > data.issues.length,
             issues: data.issues.map((i: any) => ({
               key: i.key,
               summary: i.fields.summary,
@@ -2841,21 +2999,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_status_distribution": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "status");
 
         const distribution: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const status = issue.fields.status?.name || "Unknown";
           distribution[status] = (distribution[status] || 0) + 1;
         });
 
+        const pop = issues.length || 1;
         const stats = Object.entries(distribution).map(([status, count]: [string, any]) => ({
           status,
           count,
-          percentage: ((count / data.total) * 100).toFixed(2) + "%",
+          percentage: ((count / pop) * 100).toFixed(2) + "%",
         }));
 
         return {
@@ -2864,7 +3021,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 distribution: stats,
               }, null, 2),
             },
@@ -2876,22 +3035,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_reporter_stats": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=reporter`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "reporter");
 
         const reporterCounts: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const reporter = issue.fields.reporter?.displayName || "Unknown";
           reporterCounts[reporter] = (reporterCounts[reporter] || 0) + 1;
         });
 
+        const pop = issues.length || 1;
         const stats = Object.entries(reporterCounts)
           .map(([reporter, count]: [string, any]) => ({
             reporter,
             count,
-            percentage: ((count / data.total) * 100).toFixed(2) + "%",
+            percentage: ((count / pop) * 100).toFixed(2) + "%",
           }))
           .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
@@ -2901,7 +3059,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 unique_reporters: stats.length,
                 reporters: stats,
               }, null, 2),
@@ -3002,7 +3162,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_blocked_tickets": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints() AND (status = Blocked OR labels = blocked)`;
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() AND (status = Blocked OR labels = blocked)`;
         const data = await jiraRequest(
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=500&fields=summary,status,assignee,priority`
         );
@@ -3031,21 +3191,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_priority_breakdown": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=priority`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "priority");
 
         const priorities: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const priority = issue.fields.priority?.name || "None";
           priorities[priority] = (priorities[priority] || 0) + 1;
         });
 
+        const pop = issues.length || 1;
         const breakdown = Object.entries(priorities).map(([priority, count]: [string, any]) => ({
           priority,
           count,
-          percentage: ((count / data.total) * 100).toFixed(2) + "%",
+          percentage: ((count / pop) * 100).toFixed(2) + "%",
         }));
 
         return {
@@ -3054,7 +3213,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 breakdown,
               }, null, 2),
             },
@@ -3066,24 +3227,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_component_breakdown": {
         const { project_key } = args;
         
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=components`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "components");
 
         const components: Record<string, any> = {};
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const comps = issue.fields.components?.map((c: any) => c.name) || ["No Component"];
           comps.forEach((comp: any) => {
             components[comp] = (components[comp] || 0) + 1;
           });
         });
 
+        const pop = issues.length || 1;
         const breakdown = Object.entries(components)
           .map(([component, count]: [string, any]) => ({
             component,
             count,
-            percentage: ((count / data.total) * 100).toFixed(2) + "%",
+            percentage: ((count / pop) * 100).toFixed(2) + "%",
           }))
           .sort((a: any, b: any) => (b.count as number) - (a.count as number));
 
@@ -3093,7 +3253,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 breakdown,
               }, null, 2),
             },
@@ -3145,9 +3307,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_sprint_kpi_data": {
         const { project_key, sprint_name, max_results = 1000 } = args;
 
-        let jql = `project = "${project_key}" AND sprint in openSprints()`;
+        const escProject = escapeJqlValue(project_key);
+        let jql = `project = "${escProject}" AND sprint in openSprints()`;
         if (sprint_name) {
-          jql = `project = "${project_key}" AND sprint = "${sprint_name}"`;
+          jql = `project = "${escProject}" AND sprint = "${escapeJqlValue(sprint_name)}"`;
         }
 
         const data = await jiraRequest(
@@ -3178,6 +3341,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 success: true,
                 total: data.total,
                 returned: data.issues.length,
+                truncated: data.total > data.issues.length,
                 issues: data.issues.map((issue: any) =>({
                   key: issue.key,
                   summary: issue.fields.summary,
@@ -3324,14 +3488,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_tester_workload": {
         const { project_key } = args;
 
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,customfield_10018,customfield_10705,customfield_10008`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "status,customfield_10018,customfield_10705,customfield_10008");
 
         let sprintName = "Current Sprint";
-        if (data.issues.length > 0) {
-          const sprintRaw = data.issues[0].fields?.customfield_10008;
+        if (issues.length > 0) {
+          const sprintRaw = issues[0].fields?.customfield_10008;
           if (sprintRaw && Array.isArray(sprintRaw) && sprintRaw.length > 0) {
             const parsed = parseSprint(sprintRaw[0]);
             if (parsed?.name) sprintName = parsed.name;
@@ -3345,7 +3507,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const testerName = issue.fields.customfield_10018?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10705 ?? 0;
@@ -3371,7 +3533,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 sprint: sprintName,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 testers,
                 unassigned_tester: unassignedTester,
               }, null, 2),
@@ -3384,14 +3548,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-jira_get_reviewer_workload": {
         const { project_key } = args;
 
-        const jql = `project = "${project_key}" AND sprint in openSprints()`;
-        const data = await jiraRequest(
-          `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=1000&fields=status,customfield_10020,customfield_10806,customfield_10008`
-        );
+        const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
+        const { issues, total, truncated } = await searchAllIssues(jql, "status,customfield_10020,customfield_10806,customfield_10008");
 
         let sprintName = "Current Sprint";
-        if (data.issues.length > 0) {
-          const sprintRaw = data.issues[0].fields?.customfield_10008;
+        if (issues.length > 0) {
+          const sprintRaw = issues[0].fields?.customfield_10008;
           if (sprintRaw && Array.isArray(sprintRaw) && sprintRaw.length > 0) {
             const parsed = parseSprint(sprintRaw[0]);
             if (parsed?.name) sprintName = parsed.name;
@@ -3405,7 +3567,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           by_status: {},
         };
 
-        data.issues.forEach((issue: any) => {
+        issues.forEach((issue: any) => {
           const reviewerName = issue.fields.customfield_10020?.displayName ?? null;
           const status = issue.fields.status?.name || "Unknown";
           const freq = issue.fields.customfield_10806 ?? 0;
@@ -3431,7 +3593,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 sprint: sprintName,
-                total_issues: data.total,
+                total_issues: issues.length,
+                total_matched: total,
+                truncated,
                 reviewers,
                 unassigned_reviewer: unassignedReviewer,
               }, null, 2),
@@ -3503,11 +3667,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Build JQL
         let jql: string;
         if (sprint_name) {
-          jql = `project = "${project_key}" AND sprint = "${sprint_name}"`;
+          jql = `project = "${escapeJqlValue(project_key)}" AND sprint = "${escapeJqlValue(sprint_name)}"`;
         } else if (date_from && date_to) {
-          jql = `project = "${project_key}" AND worklogDate >= "${date_from}" AND worklogDate <= "${date_to}"`;
+          jql = `project = "${escapeJqlValue(project_key)}" AND worklogDate >= "${escapeJqlValue(date_from)}" AND worklogDate <= "${escapeJqlValue(date_to)}"`;
         } else {
-          jql = `project = "${project_key}" AND sprint in openSprints()`;
+          jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
         }
 
         // Step 1: Get issues
@@ -3598,9 +3762,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Step 1: Build JQL and get sprint issues
         let jql: string;
         if (sprint_name) {
-          jql = `project = "${project_key}" AND sprint = "${sprint_name}"`;
+          jql = `project = "${escapeJqlValue(project_key)}" AND sprint = "${escapeJqlValue(sprint_name)}"`;
         } else {
-          jql = `project = "${project_key}" AND sprint in openSprints()`;
+          jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
         }
 
         const searchData = await jiraRequest(
@@ -3766,7 +3930,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const sinceJQL = sinceDate.toISOString().slice(0, 10);
 
         // Step 1: Paginate through JQL results
-        const jql = `project = "${project_key}" AND updated >= "${sinceJQL}" ORDER BY updated DESC`;
+        const jql = `project = "${escapeJqlValue(project_key)}" AND updated >= "${sinceJQL}" ORDER BY updated DESC`;
         const issueKeys: { key: string; summary: string; status: string }[] = [];
         let startAt = 0;
         const pageSize = 100;
@@ -3792,26 +3956,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const results: any[] = [];
 
         await asyncPool(5, issueKeys, async (issue) => {
-          const commentData = await jiraRequest(
-            `/rest/api/2/issue/${issue.key}/comment?maxResults=500`
-          );
-          for (const comment of commentData.comments || []) {
-            const commentDate = new Date(comment.created);
-            if (
-              commentDate >= sinceDate &&
-              commentDate <= untilDate &&
-              comment.body && comment.body.includes(mentionPattern)
-            ) {
-              results.push({
-                issue_key: issue.key,
-                issue_summary: issue.summary,
-                issue_status: issue.status,
-                comment_author: comment.author?.displayName || comment.author?.name || "Unknown",
-                comment_created: comment.created,
-                comment_body: comment.body.slice(0, 300),
-              });
+          // Paginate the comment endpoint so issues with >500 comments are fully scanned.
+          let cStart = 0;
+          const cPage = 100;
+          let cTotal = 0;
+          do {
+            const commentData = await jiraRequest(
+              `/rest/api/2/issue/${issue.key}/comment?maxResults=${cPage}&startAt=${cStart}`
+            );
+            cTotal = commentData.total ?? (commentData.comments?.length ?? 0);
+            const batch = commentData.comments || [];
+            for (const comment of batch) {
+              const commentDate = new Date(comment.created);
+              if (
+                commentDate >= sinceDate &&
+                commentDate <= untilDate &&
+                comment.body && comment.body.includes(mentionPattern)
+              ) {
+                results.push({
+                  issue_key: issue.key,
+                  issue_summary: issue.summary,
+                  issue_status: issue.status,
+                  comment_author: comment.author?.displayName || comment.author?.name || "Unknown",
+                  comment_created: comment.created,
+                  comment_body: comment.body.slice(0, 300),
+                });
+              }
             }
-          }
+            cStart += batch.length;
+            if (batch.length === 0) break;
+          } while (cStart < cTotal);
         });
 
         // Sort by comment_created DESC
@@ -4051,7 +4225,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!attachment_id) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "attachment_id is required");
         }
-        const maxBytes = (max_size_mb || 10) * 1024 * 1024;
+        const mb = Number(max_size_mb);
+        const effMb = Number.isFinite(mb) && mb > 0 ? mb : 10;
+        const maxBytes = effMb * 1024 * 1024;
 
         // Fetch metadata via standard Jira REST (returns JSON)
         const meta = await jiraRequest(`/rest/api/2/attachment/${attachment_id}`);
@@ -4070,11 +4246,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const { buffer } = await fetchAttachmentBinary(contentUrl, maxBytes);
-
-        const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
-        const TEXT_MIME_PREFIXES = ["text/"];
-        const TEXT_MIME_EXACT = ["application/json", "application/xml"];
-        const TEXT_SIZE_LIMIT = 500 * 1024;
 
         const isImage = IMAGE_MIME_TYPES.includes(mimeType);
         const isText = (TEXT_MIME_PREFIXES.some(p => mimeType.startsWith(p)) || TEXT_MIME_EXACT.includes(mimeType))
@@ -4124,11 +4295,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!bulkIssueKey) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required");
         }
-        const bulkMaxBytes = (bulkMaxMb || 10) * 1024 * 1024;
-        const imageLimit = Math.min(max_images || 5, 5);
-        const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"];
+        const bulkMb = Number(bulkMaxMb);
+        const effBulkMb = Number.isFinite(bulkMb) && bulkMb > 0 ? bulkMb : 10;
+        const bulkMaxBytes = effBulkMb * 1024 * 1024;
+        const reqImages = Number(max_images);
+        const imageLimit = Math.min(Number.isFinite(reqImages) && reqImages > 0 ? reqImages : 5, 5);
 
-        const bulkData = await jiraRequest(`/rest/api/2/issue/${bulkIssueKey}?fields=attachment`);
+        const bulkData = await jiraRequest(`/rest/api/2/issue/${encodeURIComponent(bulkIssueKey)}?fields=attachment`);
         const allAttachments = bulkData.fields?.attachment || [];
         const imageAttachments = allAttachments
           .filter((a: any) => IMAGE_MIME_TYPES.includes((a.mimeType || "").split(";")[0].trim()))
@@ -4193,7 +4366,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-confluence_search_pages": {
         const { cql, limit = 25, start = 0 } = args;
         if (!cql) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "cql is required", {}, "Provide a CQL query, e.g. 'space=DEV AND type=page'");
-        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(String(cql))}&limit=${limit}&start=${start}&expand=space,version,history`);
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(String(cql))}&limit=${limit}&start=${start}&expand=space,version,history,history.lastUpdated`);
         return {
           content: [{
             type: "text",
@@ -4378,9 +4551,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "quicktext-confluence_search_by_label": {
         const { label, space_key, limit = 25 } = args;
         if (!label) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "label is required");
-        const spaceFilter = space_key ? ` AND space="${space_key}"` : '';
-        const cql = `label="${label}" AND type=page${spaceFilter}`;
-        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=space,version,history`);
+        const spaceFilter = space_key ? ` AND space="${escapeCqlValue(space_key)}"` : '';
+        const cql = `label="${escapeCqlValue(label)}" AND type=page${spaceFilter}`;
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&expand=space,version,history,history.lastUpdated`);
         return {
           content: [{
             type: "text",
@@ -4445,7 +4618,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             author: v.by?.displayName,
           }));
         } catch (versionErr: any) {
-          if (versionErr.error_code === ConfluenceErrorCodes.PAGE_NOT_FOUND) {
+          // Older Confluence Server versions lack the /version sub-resource and may
+          // answer 404 (PAGE_NOT_FOUND) or 405/other (API_ERROR). Fall back in both
+          // cases, but still surface auth failures (401/403).
+          if (
+            versionErr.error_code === ConfluenceErrorCodes.PAGE_NOT_FOUND ||
+            versionErr.error_code === ConfluenceErrorCodes.API_ERROR
+          ) {
             // /version endpoint not available — fall back to /history
             source = "history";
             const hist = await confluenceRequest(
@@ -4630,7 +4809,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      default:
       // 69. MOVE PAGE
       case "quicktext-confluence_move_page": {
         const { page_id, target_space_key, target_parent_id } = args;
@@ -4706,6 +4884,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      default:
         throw createError(
           ErrorCodes.INVALID_PARAMETER,
           `Unknown tool: ${name}`,
@@ -4727,7 +4906,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    // Otherwise, wrap it in a structured error
+    // Otherwise, wrap it in a structured error.
+    // Log the stack to stderr (server-side) instead of returning it to the client,
+    // to avoid disclosing absolute paths / internals over the tool result.
+    console.error("Unexpected error handling tool call:", error?.stack ?? error);
     return {
       content: [
         {
@@ -4736,7 +4918,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             createError(
               ErrorCodes.JIRA_API_ERROR,
               `Unexpected error: ${error.message}`,
-              { original_error: error.message, stack: error.stack }
+              { original_error: error.message }
             ),
             null,
             2
