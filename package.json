@@ -8,7 +8,8 @@
     "start": "node --env-file=.env build/index.js",
     "dev": "vite",
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "test:live": "node --env-file=.env tests/live/run-live-suite.mjs"
   },
   "keywords": [
     "mcp",
