@@ -946,7 +946,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       // 15. TRANSITION ISSUE
       {
         name: "quicktext-jira_transition_issue",
-        description: "Change issue status (To Do → In Progress → Done, etc.). Use get_transitions to see available transitions first. Example: quicktext-jira_transition_issue({issue_key: 'QT-123', transition_id: '31'})",
+        description: "Change issue status (To Do → In Progress → Done, etc.). Use get_transitions to see available transitions first. Pass `fields` to set values that live on the transition screen (e.g. resolution) — these cannot be set via update_issue. Example: quicktext-jira_transition_issue({issue_key: 'QT-123', transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
         inputSchema: {
           type: "object",
           properties: {
@@ -957,6 +957,11 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             transition_id: {
               type: "string",
               description: "Transition ID (get from quicktext-jira_get_transitions)",
+            },
+            fields: {
+              type: "object",
+              description: "Optional field values to set during the transition (transition-screen fields like resolution), e.g. {\"resolution\": {\"name\": \"Won't Do\"}}. Sent as the \"fields\" key alongside the transition.",
+              additionalProperties: true,
             },
           },
           required: ["issue_key", "transition_id"],
@@ -1207,7 +1212,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       },
       {
         name: "quicktext-jira_bulk_transition",
-        description: "Transition multiple issues to same status at once. Efficient for batch operations. Example: quicktext-jira_bulk_transition({issue_keys: ['QT-1', 'QT-2'], transition_id: '31'})",
+        description: "Transition multiple issues to same status at once. Efficient for batch operations. Pass `fields` to set transition-screen values (e.g. resolution) on every issue in the batch. Example: quicktext-jira_bulk_transition({issue_keys: ['QT-1', 'QT-2'], transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1219,6 +1224,11 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             transition_id: {
               type: "string",
               description: "Transition ID (same for all issues)",
+            },
+            fields: {
+              type: "object",
+              description: "Optional field values to set during the transition for every issue (transition-screen fields like resolution), e.g. {\"resolution\": {\"name\": \"Won't Do\"}}.",
+              additionalProperties: true,
             },
           },
           required: ["issue_keys", "transition_id"],
@@ -2734,7 +2744,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 15. TRANSITION ISSUE
       case "quicktext-jira_transition_issue": {
-        const { issue_key, transition_id } = args;
+        const { issue_key, transition_id, fields } = args;
 
         if (!isValidIssueKey(issue_key)) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required and must look like 'PROJ-123'");
@@ -2748,11 +2758,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           );
         }
 
+        // Build the transition body. Include "fields" only when provided so that
+        // transition-screen-only fields (e.g. resolution) can be set atomically
+        // with the transition; existing callers that omit fields are unaffected.
+        const transitionBody: any = { transition: { id: transition_id } };
+        if (fields && typeof fields === "object" && Object.keys(fields).length > 0) {
+          transitionBody.fields = fields;
+        }
+
         await jiraRequest(`/rest/api/2/issue/${issue_key}/transitions`, {
           method: "POST",
-          body: JSON.stringify({
-            transition: { id: transition_id },
-          }),
+          body: JSON.stringify(transitionBody),
         });
 
         return {
@@ -2762,6 +2778,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               text: JSON.stringify({
                 success: true,
                 message: `Issue ${issue_key} transitioned successfully`,
+                fields_set: transitionBody.fields ? Object.keys(transitionBody.fields) : [],
               }, null, 2),
             },
           ],
@@ -3265,23 +3282,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 30. BULK TRANSITION
       case "quicktext-jira_bulk_transition": {
-        const { issue_keys, transition_id } = args;
-        
+        const { issue_keys, transition_id, fields } = args;
+
         if (!issue_keys || issue_keys.length === 0) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
             "issue_keys array is required"
           );
         }
+        if (!transition_id) {
+          throw createError(
+            ErrorCodes.MISSING_REQUIRED_FIELD,
+            "transition_id is required"
+          );
+        }
+
+        // Apply the same optional transition-screen fields (e.g. resolution) to
+        // every issue in the batch. Omitted when not provided (backward compatible).
+        const hasFields = fields && typeof fields === "object" && Object.keys(fields).length > 0;
 
         const results = [];
         for (const key of issue_keys) {
           try {
-            await jiraRequest(`/rest/api/2/issue/${key}/transitions`, {
+            const body: any = { transition: { id: transition_id } };
+            if (hasFields) body.fields = fields;
+            await jiraRequest(`/rest/api/2/issue/${encodeURIComponent(key)}/transitions`, {
               method: "POST",
-              body: JSON.stringify({
-                transition: { id: transition_id },
-              }),
+              body: JSON.stringify(body),
             });
             results.push({ issue_key: key, success: true });
           } catch (error: any) {
@@ -3289,13 +3316,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
+        const failed = results.filter(r => !r.success).length;
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
-                success: true,
+                success: failed === 0,
                 total_processed: issue_keys.length,
+                succeeded: issue_keys.length - failed,
+                failed,
+                fields_set: hasFields ? Object.keys(fields) : [],
                 results,
               }, null, 2),
             },
