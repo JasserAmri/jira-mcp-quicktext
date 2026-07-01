@@ -764,7 +764,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       // 10. GET ALL LABELS
       {
         name: "quicktext-jira_get_all_labels",
-        description: "Discover all labels used in project with usage counts. Helps identify available labels for filtering. Example: quicktext-jira_get_all_labels({project_key: 'QT'})",
+        description: "Discover labels used in a project with usage counts. Defaults to the project's OPEN SPRINTS (fast, consistent with the other analytics tools). Pass scope:'all' to scan the whole project history (slower; may be truncated on very large projects — check the 'truncated' flag). Example: quicktext-jira_get_all_labels({project_key: 'QT'}) or ({project_key: 'QT', scope: 'all'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -772,6 +772,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Project key (e.g., 'QT')",
               default: "QT",
+            },
+            scope: {
+              type: "string",
+              enum: ["open_sprints", "all"],
+              description: "'open_sprints' (default): labels on issues in the project's open sprints. 'all': labels across the entire project history.",
+              default: "open_sprints",
             },
           },
           required: ["project_key"],
@@ -1158,8 +1164,17 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             },
             sprint_count: {
               type: ["number", "string"],
-              description: "Number of past sprints to analyze (default: 3)",
+              description: "Number of past (closed) sprints to analyze (default: 3)",
               default: 3,
+            },
+            board_id: {
+              type: ["number", "string"],
+              description: "Optional board id. If omitted, the first scrum board for the project is used.",
+            },
+            story_points_field: {
+              type: "string",
+              description: "Custom field id holding story points (default: customfield_10023)",
+              default: "customfield_10023",
             },
           },
           required: ["project_key"],
@@ -2318,18 +2333,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 9. RATE LIMITS
       case "quicktext-jira_get_rate_limits": {
+        // Rate-limit info is populated only if the server sends X-RateLimit-* headers.
+        // Self-hosted Jira Data Center typically does NOT emit these headers, so the
+        // values stay null — report that honestly rather than a bare "Unknown".
+        const reported = rateLimitInfo.limit !== null || rateLimitInfo.remaining !== null || rateLimitInfo.reset !== null;
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 success: true,
+                headers_reported: reported,
                 rate_limit: {
-                  limit: rateLimitInfo.limit || "Unknown",
-                  remaining: rateLimitInfo.remaining || "Unknown",
-                  reset: rateLimitInfo.reset || "Unknown",
-                  status: rateLimitInfo.remaining && rateLimitInfo.remaining < 10 ? "WARNING" : "OK",
+                  limit: rateLimitInfo.limit ?? "not reported by this Jira instance",
+                  remaining: rateLimitInfo.remaining ?? "not reported by this Jira instance",
+                  reset: rateLimitInfo.reset ?? "not reported by this Jira instance",
+                  status: !reported ? "UNKNOWN" : (rateLimitInfo.remaining !== null && rateLimitInfo.remaining < 10 ? "WARNING" : "OK"),
                 },
+                note: reported ? undefined : "This Jira Data Center instance does not send X-RateLimit-* headers, so live quota values are unavailable. This is expected on most self-hosted deployments.",
               }, null, 2),
             },
           ],
@@ -2338,9 +2359,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 10. GET ALL LABELS
       case "quicktext-jira_get_all_labels": {
-        const { project_key } = args;
-        
-        const jql = `project = "${escapeJqlValue(project_key)}"`;
+        const { project_key, scope = "open_sprints" } = args;
+
+        // Default to open sprints (fast, consistent with sibling analytics tools).
+        // scope:'all' scans the entire project history (may truncate on huge projects).
+        const scopeClause = scope === "all" ? "" : " AND sprint in openSprints()";
+        const jql = `project = "${escapeJqlValue(project_key)}"${scopeClause}`;
         const { issues, total, truncated } = await searchAllIssues(jql, "labels");
 
         const labelCounts: Record<string, any> = {};
@@ -2360,6 +2384,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
+                scope,
                 total_unique_labels: sortedLabels.length,
                 issues_scanned: issues.length,
                 total_matched: total,
@@ -3159,16 +3184,81 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 26. GET SPRINT VELOCITY
       case "quicktext-jira_get_sprint_velocity": {
-        const { project_key, sprint_count = 3 } = args;
-        
+        const { project_key, board_id } = args;
+        const spField: string = args.story_points_field || "customfield_10023";
+        const sprintCount = Math.max(1, Number(args.sprint_count) > 0 ? Number(args.sprint_count) : 3);
+
+        // 1. Resolve a scrum board for the project (unless one was given).
+        let boardId = board_id;
+        if (!boardId) {
+          const boards = await jiraRequest(`/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(project_key)}&maxResults=50`);
+          const values = boards.values ?? [];
+          const scrum = values.find((b: any) => b.type === "scrum") ?? values[0];
+          if (!scrum) {
+            throw createError(
+              ErrorCodes.SPRINT_NOT_FOUND,
+              `No board found for project ${project_key}`,
+              { project_key },
+              "Pass board_id explicitly, or verify the project has an associated scrum board"
+            );
+          }
+          boardId = scrum.id;
+        }
+
+        // 2. Get closed sprints for the board, newest first, take the last N.
+        const sprintsResp = await jiraRequest(`/rest/agile/1.0/board/${boardId}/sprint?state=closed&maxResults=50`);
+        const closed = (sprintsResp.values ?? [])
+          .sort((a: any, b: any) => new Date(b.completeDate || b.endDate || 0).getTime() - new Date(a.completeDate || a.endDate || 0).getTime())
+          .slice(0, sprintCount);
+
+        if (closed.length === 0) {
+          return { content: [{ type: "text", text: JSON.stringify({
+            success: true, board_id: boardId, sprints_analyzed: 0,
+            message: "No closed sprints found for this board.",
+          }, null, 2) }] };
+        }
+
+        // 3. For each sprint, sum committed vs completed story points.
+        const perSprint: any[] = [];
+        for (const sp of closed) {
+          let startAt = 0, total = 0, committed = 0, completed = 0, counted = 0;
+          for (let i = 0; i < 100; i++) {
+            const issuesResp = await jiraRequest(`/rest/agile/1.0/sprint/${sp.id}/issue?fields=${spField},status&maxResults=100&startAt=${startAt}`);
+            total = issuesResp.total ?? 0;
+            const batch = issuesResp.issues ?? [];
+            for (const issue of batch) {
+              const pts = Number(issue.fields?.[spField]) || 0;
+              committed += pts;
+              counted++;
+              if (issue.fields?.status?.statusCategory?.key === "done") completed += pts;
+            }
+            startAt += batch.length;
+            if (batch.length === 0 || startAt >= total) break;
+          }
+          perSprint.push({
+            sprint_id: sp.id,
+            name: sp.name,
+            completed_at: sp.completeDate || sp.endDate || null,
+            issues: counted,
+            committed_points: committed,
+            completed_points: completed,
+          });
+        }
+
+        const avg = perSprint.reduce((s, x) => s + x.completed_points, 0) / perSprint.length;
+
         return {
           content: [
             {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                message: "Sprint velocity calculation requires board_id and historical sprint data",
-                note: "Use list_sprints to get sprint IDs, then query each sprint for story points",
+                board_id: boardId,
+                story_points_field: spField,
+                sprints_analyzed: perSprint.length,
+                average_velocity: Math.round(avg * 100) / 100,
+                sprints: perSprint,
+                note: "committed = story points of all issues in the sprint at query time; completed = points in a Done status category. If points look wrong, pass the correct story_points_field.",
               }, null, 2),
             },
           ],
@@ -4461,8 +4551,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { space_key, title } = args;
         if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
         if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
-        const cql = `space="${space_key}" AND title="${String(title).replace(/"/g, '\\"')}" AND type=page`;
-        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,version,space,history,ancestors&limit=5`);
+        const cql = `space="${escapeCqlValue(space_key)}" AND title="${escapeCqlValue(String(title))}" AND type=page`;
+        const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(cql)}&expand=body.storage,version,space,history,history.lastUpdated,ancestors&limit=5`);
         if (!data.results?.length) {
           return { content: [{ type: "text", text: JSON.stringify({ success: false, message: `No page found with title "${title}" in space ${space_key}` }, null, 2) }] };
         }
