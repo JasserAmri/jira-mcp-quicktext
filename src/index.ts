@@ -544,6 +544,23 @@ function resolveAssigneeRolesCached(customfield10301: any) {
   };
 }
 
+// Resolve the user token inside each raw customfield_10301 entry
+// (e.g. "Role: 10105 (mbo)" -> "Role: 10105 (Malek Boubakri)"), so the raw
+// field rendering is consistent with the resolved assignee_roles object.
+// Works for any role id, not just dev/test.
+async function resolveRoleFieldEntries(cf: any): Promise<any> {
+  if (!Array.isArray(cf)) return cf;
+  return Promise.all(cf.map(async (entry: any) => {
+    if (typeof entry !== "string") return entry;
+    const m = entry.match(/\(([^)]*)\)/);
+    const token = (m?.[1] ?? "").trim();
+    // Skip empty or non-user placeholders (e.g. "()", "null", "null | null")
+    if (!token || token === "null" || token.includes("|")) return entry;
+    const name = await resolveUserDisplayName(token);
+    return name && name !== token ? entry.replace(/\(([^)]*)\)/, `(${name})`) : entry;
+  }));
+}
+
 // Resolve (and cache) every dev/test token across a set of issues in parallel.
 async function prewarmRoleNames(issues: any[]) {
   const tokens = new Set<string>();
@@ -2036,6 +2053,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         );
 
         const fullIssueRoles = await resolveAssigneeRoles(data.fields.customfield_10301);
+        const resolvedCf10301 = await resolveRoleFieldEntries(data.fields.customfield_10301);
 
         return {
           content: [
@@ -2064,8 +2082,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   time_estimate: data.fields.timeestimate,
                   time_logged: data.fields.timespent,
                   custom_fields: {
-                    customfield_10300: data.fields.customfield_10300, // Time logged by role
-                    customfield_10301: data.fields.customfield_10301, // Assignee roles (raw)
+                    customfield_10300: data.fields.customfield_10300, // Time logged by role (raw)
+                    customfield_10301: resolvedCf10301, // Assignee roles with user tokens resolved to display names
+                    customfield_10301_raw: data.fields.customfield_10301, // original unresolved values
                   },
                   assignee_roles: fullIssueRoles, // resolved display names (+ *_raw tokens)
                   tester: data.fields.customfield_10018?.displayName ?? null,
