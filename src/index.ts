@@ -501,6 +501,60 @@ function parseAssigneeRoles(customfield10301: any) {
   return assignments;
 }
 
+// Resolve a Jira user token (login name like "mbo" OR a user key like "JIRAUSER10234")
+// to a display name. Cached for the process lifetime so repeated keys cost one call.
+const userNameCache = new Map<string, string>();
+async function resolveUserDisplayName(token: string | null): Promise<string | null> {
+  if (!token) return null;
+  if (userNameCache.has(token)) return userNameCache.get(token)!;
+  // Jira Data Center: keys look like JIRAUSER#####; anything else is treated as a username.
+  const qs = /^JIRAUSER\d+$/i.test(token)
+    ? `key=${encodeURIComponent(token)}`
+    : `username=${encodeURIComponent(token)}`;
+  try {
+    const u = await jiraRequest(`/rest/api/2/user?${qs}`);
+    const name = u?.displayName || token;
+    userNameCache.set(token, name); // cache successful resolutions only
+    return name;
+  } catch (_) {
+    return token; // fall back to the raw token; don't cache transient failures
+  }
+}
+
+// Resolve the dev/test tokens from parseAssigneeRoles() to display names,
+// keeping the raw tokens for traceability.
+async function resolveAssigneeRoles(customfield10301: any) {
+  const raw = parseAssigneeRoles(customfield10301);
+  const [dev, test] = await Promise.all([
+    resolveUserDisplayName(raw.dev),
+    resolveUserDisplayName(raw.test),
+  ]);
+  return { dev, test, dev_raw: raw.dev, test_raw: raw.test };
+}
+
+// Synchronous variant that reads only from the cache (call after pre-warming with
+// prewarmRoleNames). Falls back to the raw token if a name isn't cached.
+function resolveAssigneeRolesCached(customfield10301: any) {
+  const raw = parseAssigneeRoles(customfield10301);
+  return {
+    dev: raw.dev ? (userNameCache.get(raw.dev) ?? raw.dev) : null,
+    test: raw.test ? (userNameCache.get(raw.test) ?? raw.test) : null,
+    dev_raw: raw.dev,
+    test_raw: raw.test,
+  };
+}
+
+// Resolve (and cache) every dev/test token across a set of issues in parallel.
+async function prewarmRoleNames(issues: any[]) {
+  const tokens = new Set<string>();
+  for (const issue of issues) {
+    const r = parseAssigneeRoles(issue.fields?.customfield_10301);
+    if (r.dev) tokens.add(r.dev as string);
+    if (r.test) tokens.add(r.test as string);
+  }
+  await Promise.all([...tokens].map((t) => resolveUserDisplayName(t)));
+}
+
 // Helper: Parse sprint from Jira's Java toString() format
 // Format: "com.atlassian.greenhopper.service.sprint.Sprint@xxx[id=304,rapidViewId=4,state=ACTIVE,name=QUIC Sprint 197,startDate=2026-01-27T15:17:00.000Z,endDate=2026-02-10T15:17:00.000Z,...]"
 function parseSprint(sprintData: any) {
@@ -1978,8 +2032,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const data = await jiraRequest(
-          `/rest/api/2/issue/${issue_key}?expand=changelog,renderedFields`
+          `/rest/api/2/issue/${encodeURIComponent(issue_key)}?expand=changelog,renderedFields`
         );
+
+        const fullIssueRoles = await resolveAssigneeRoles(data.fields.customfield_10301);
 
         return {
           content: [
@@ -2009,8 +2065,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   time_logged: data.fields.timespent,
                   custom_fields: {
                     customfield_10300: data.fields.customfield_10300, // Time logged by role
-                    customfield_10301: data.fields.customfield_10301, // Assignee roles
+                    customfield_10301: data.fields.customfield_10301, // Assignee roles (raw)
                   },
+                  assignee_roles: fullIssueRoles, // resolved display names (+ *_raw tokens)
                   tester: data.fields.customfield_10018?.displayName ?? null,
                   reviewed_by: data.fields.customfield_10020?.displayName ?? null,
                   participants: Array.isArray(data.fields.customfield_10019)
@@ -2045,6 +2102,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           `/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=${max_results}&fields=*all`
         );
 
+        const sprintIssues = await Promise.all(data.issues.map(async (issue: any) => ({
+          key: issue.key,
+          summary: issue.fields.summary,
+          status: issue.fields.status?.name,
+          priority: issue.fields.priority?.name,
+          assignee: issue.fields.assignee?.displayName || "Unassigned",
+          reporter: issue.fields.reporter?.displayName,
+          created: issue.fields.created,
+          updated: issue.fields.updated,
+          labels: issue.fields.labels || [],
+          components: issue.fields.components?.map((c: any) => c.name) || [],
+          story_points: issue.fields.customfield_10023,
+          assignee_roles: await resolveAssigneeRoles(issue.fields.customfield_10301),
+          sprints: parseSprints(issue.fields.customfield_10008),
+        })));
+
         return {
           content: [
             {
@@ -2055,21 +2128,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 returned: data.issues.length,
                 truncated: data.total > data.issues.length,
                 max_results,
-                issues: data.issues.map((issue: any) =>({
-                  key: issue.key,
-                  summary: issue.fields.summary,
-                  status: issue.fields.status?.name,
-                  priority: issue.fields.priority?.name,
-                  assignee: issue.fields.assignee?.displayName || "Unassigned",
-                  reporter: issue.fields.reporter?.displayName,
-                  created: issue.fields.created,
-                  updated: issue.fields.updated,
-                  labels: issue.fields.labels || [],
-                  components: issue.fields.components?.map((c: any) => c.name) || [],
-                  story_points: issue.fields.customfield_10023,
-                  assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
-                  sprints: parseSprints(issue.fields.customfield_10008),
-                })),
+                issues: sprintIssues,
               }, null, 2),
             },
           ],
@@ -3454,6 +3513,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return result;
         };
 
+        // Pre-resolve all assignee-role user tokens so the map below can read
+        // display names from cache synchronously.
+        await prewarmRoleNames(data.issues);
+
         return {
           content: [
             {
@@ -3480,7 +3543,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                   frequency_tested_ko: issue.fields.customfield_10705 || 0,
                   frequency_review_ko: issue.fields.customfield_10806 || 0,
                   time_tracking_by_roles: parseTimeLoggedByRole(issue.fields.customfield_10300),
-                  assignee_roles: parseAssigneeRoles(issue.fields.customfield_10301),
+                  assignee_roles: resolveAssigneeRolesCached(issue.fields.customfield_10301),
                   sprints: parseSprints(issue.fields.customfield_10008),
                   // --- NEW FIELDS ---
                   tester: issue.fields.customfield_10018?.displayName ?? null,
