@@ -33,7 +33,7 @@ jobs:
         run: npm run build
 
       - name: Pack MCPB bundle
-        run: npx --yes @anthropic-ai/mcpb@latest pack . jira-confluence-quicktext.mcpb
+        run: npx --yes @anthropic-ai/mcpb@latest pack . jira-confluence-quinta.mcpb
 
       # Optional signing: if an MCPB_SIGN_CERT / MCPB_SIGN_KEY secret pair is
       # configured, sign the bundle so Claude Desktop shows it as verified.
@@ -46,16 +46,16 @@ jobs:
         run: |
           printf '%s' "$MCPB_SIGN_CERT" > sign-cert.pem
           printf '%s' "$MCPB_SIGN_KEY" > sign-key.pem
-          npx --yes @anthropic-ai/mcpb@latest sign jira-confluence-quicktext.mcpb \
+          npx --yes @anthropic-ai/mcpb@latest sign jira-confluence-quinta.mcpb \
             --cert sign-cert.pem --key sign-key.pem
           rm -f sign-cert.pem sign-key.pem
 
       - name: Validate the packed bundle
-        run: npx --yes @anthropic-ai/mcpb@latest info jira-confluence-quicktext.mcpb
+        run: npx --yes @anthropic-ai/mcpb@latest info jira-confluence-quinta.mcpb
 
       - name: Attach bundle to release
         uses: softprops/action-gh-release@v2
         with:
-          files: jira-confluence-quicktext.mcpb
+          files: jira-confluence-quinta.mcpb
           fail_on_unmatched_files: true
           generate_release_notes: true

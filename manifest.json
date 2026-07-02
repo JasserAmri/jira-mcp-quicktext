@@ -1,11 +1,11 @@
 {
   "manifest_version": "0.2",
   "name": "jira-confluence-quicktext",
-  "display_name": "Jira & Confluence (QuickText)",
+  "display_name": "Jira & Confluence (Quinta)",
   "version": "5.0.0",
-  "description": "QuickText Jira + Confluence tools for self-hosted Data Center — 69 tools (53 Jira + 16 Confluence). Each user connects with their own Personal Access Token.",
+  "description": "Quinta Jira + Confluence tools for self-hosted Data Center — 69 tools (53 Jira + 16 Confluence). Each user connects with their own Personal Access Token.",
   "author": {
-    "name": "QuickText"
+    "name": "Quinta"
   },
   "license": "MIT",
   "icon": "icon.png",

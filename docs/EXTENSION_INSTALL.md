@@ -9,7 +9,7 @@ Nothing sensitive is baked into the shared file.
 
 ## For colleagues — install (2 minutes)
 
-1. **Get the bundle**: download `jira-confluence-quicktext.mcpb` from the latest
+1. **Get the bundle**: download `jira-confluence-quinta.mcpb` from the latest
    [GitHub Release](https://github.com/JasserAmri/jira-mcp-quicktext/releases) (or wherever
    your admin shared it).
 2. **Open** Claude Desktop → **Settings → Extensions**.
@@ -48,16 +48,16 @@ git tag v5.0.0 && git push origin v5.0.0
 **Option B — build locally:**
 ```bash
 npm ci
-npm run bundle      # runs the build + packs jira-confluence-quicktext.mcpb
+npm run bundle      # runs the build + packs jira-confluence-quinta.mcpb
 ```
-Then distribute the resulting `jira-confluence-quicktext.mcpb` (shared drive, Slack, MDM, etc.).
+Then distribute the resulting `jira-confluence-quinta.mcpb` (shared drive, Slack, MDM, etc.).
 
 ### Optional: sign the bundle
 Unsigned bundles install fine but show as an unverified publisher. To sign in CI, add repo
 secrets `MCPB_SIGN_CERT` and `MCPB_SIGN_KEY` (PEM contents) — the release workflow signs
 automatically when they're present. To sign locally:
 ```bash
-npx @anthropic-ai/mcpb sign jira-confluence-quicktext.mcpb --cert cert.pem --key key.pem
+npx @anthropic-ai/mcpb sign jira-confluence-quinta.mcpb --cert cert.pem --key key.pem
 ```
 
 ---
