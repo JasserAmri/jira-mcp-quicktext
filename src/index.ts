@@ -5,7 +5,7 @@
  * Enhanced with MCP Best Practices + Phase 2 Discovery Suite
  *
  * Production Features:
- * ✅ Vendor Prefix: quicktext-jira_ (53 tools) + quicktext-confluence_ (16 tools)
+ * ✅ Vendor Prefix: quinta-jira_ (53 tools) + quinta-confluence_ (16 tools)
  * ✅ Enhanced Descriptions: Comprehensive tool documentation with examples
  * ✅ Structured Errors: Machine-readable error codes (JIRA_1xxx-5xxx, CONF_1xxx-5xxx)
  * ✅ Tool Count: 69 tools total (53 Jira + 16 Confluence)
@@ -328,7 +328,7 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
       } else if (response.status === 404) {
         throw createError(ConfluenceErrorCodes.PAGE_NOT_FOUND, "Confluence resource not found", { status: 404, endpoint }, "Verify the page ID, space key, or URL is correct");
       } else if (response.status === 409) {
-        throw createError(ConfluenceErrorCodes.API_ERROR, "Version conflict: the page was updated since you fetched it", { status: 409 }, "Fetch the page again with quicktext-confluence_get_page to get the latest version number, then retry");
+        throw createError(ConfluenceErrorCodes.API_ERROR, "Version conflict: the page was updated since you fetched it", { status: 409 }, "Fetch the page again with quinta-confluence_get_page to get the latest version number, then retry");
       } else if (response.status === 429) {
         throw createError(ConfluenceErrorCodes.RATE_LIMIT, "Confluence rate limit exceeded", { status: 429, retry_after: response.headers.get("Retry-After") }, "Wait before retrying");
       } else {
@@ -670,8 +670,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [      // 1. GET FULL ISSUE
       {
-        name: "quicktext-jira_get_full_issue",
-        description: "Get COMPLETE issue details including descriptions, comments, assignee names, priority, and all custom fields. Example: quicktext-jira_get_full_issue({issue_key: 'QT-14006'})",
+        name: "quinta-jira_get_full_issue",
+        description: "Get COMPLETE issue details including descriptions, comments, assignee names, priority, and all custom fields. Example: quinta-jira_get_full_issue({issue_key: 'QT-14006'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -686,8 +686,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 2. SEARCH SPRINT ISSUES
       {
-        name: "quicktext-jira_search_sprint_issues",
-        description: "Search all issues in current or specific sprint with FULL field data including assignees, priorities, descriptions. Returns paginated results with total count. Example: quicktext-jira_search_sprint_issues({project_key: 'QT', max_results: 500})",
+        name: "quinta-jira_search_sprint_issues",
+        description: "Search all issues in current or specific sprint with FULL field data including assignees, priorities, descriptions. Returns paginated results with total count. Example: quinta-jira_search_sprint_issues({project_key: 'QT', max_results: 500})",
         inputSchema: {
           type: "object",
           properties: {
@@ -712,8 +712,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 3. TEAM WORKLOAD
       {
-        name: "quicktext-jira_get_team_workload",
-        description: "Analyze team workload distribution for current sprint with assignee names and ticket counts grouped by status. Includes unassigned tickets. Example: quicktext-jira_get_team_workload({project_key: 'QT'})",
+        name: "quinta-jira_get_team_workload",
+        description: "Analyze team workload distribution for current sprint with assignee names and ticket counts grouped by status. Includes unassigned tickets. Example: quinta-jira_get_team_workload({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -729,8 +729,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 4. HOTFIX ANALYSIS
       {
-        name: "quicktext-jira_analyze_hotfixes",
-        description: "Analyze all HOTFIX tickets in current sprint - groups by component, identifies patterns, calculates ratio vs total tickets. Detects 'HOTFIX' and 'HTOFIX' typo variants. Example: quicktext-jira_analyze_hotfixes({project_key: 'QT'})",
+        name: "quinta-jira_analyze_hotfixes",
+        description: "Analyze all HOTFIX tickets in current sprint - groups by component, identifies patterns, calculates ratio vs total tickets. Detects 'HOTFIX' and 'HTOFIX' typo variants. Example: quinta-jira_analyze_hotfixes({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -746,8 +746,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 5. ADVANCED SEARCH
       {
-        name: "quicktext-jira_search_advanced",
-        description: "Advanced JQL search with custom field selection. Supports complex queries with AND/OR logic, custom fields, date ranges. Example: quicktext-jira_search_advanced({jql: 'project = QT AND status = \"In Progress\"', max_results: 100})",
+        name: "quinta-jira_search_advanced",
+        description: "Advanced JQL search with custom field selection. Supports complex queries with AND/OR logic, custom fields, date ranges. Example: quinta-jira_search_advanced({jql: 'project = QT AND status = \"In Progress\"', max_results: 100})",
         inputSchema: {
           type: "object",
           properties: {
@@ -767,8 +767,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 6. TIME METRICS
       {
-        name: "quicktext-jira_get_time_metrics",
-        description: "Extract time estimates and logged time BY ROLE (dev/test/review) for current sprint. Includes ticket-level breakdown and sprint totals in hours/days. Example: quicktext-jira_get_time_metrics({project_key: 'QT'})",
+        name: "quinta-jira_get_time_metrics",
+        description: "Extract time estimates and logged time BY ROLE (dev/test/review) for current sprint. Includes ticket-level breakdown and sprint totals in hours/days. Example: quinta-jira_get_time_metrics({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -784,8 +784,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 7. UNASSIGNED BY ROLE
       {
-        name: "quicktext-jira_get_unassigned_by_role",
-        description: "Count tickets unassigned for DEVELOPER vs TESTER roles separately. Helps identify bottlenecks in role-based assignment workflow. Example: quicktext-jira_get_unassigned_by_role({project_key: 'QT'})",
+        name: "quinta-jira_get_unassigned_by_role",
+        description: "Count tickets unassigned for DEVELOPER vs TESTER roles separately. Helps identify bottlenecks in role-based assignment workflow. Example: quinta-jira_get_unassigned_by_role({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -801,8 +801,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 8. SEARCH BY LABELS
       {
-        name: "quicktext-jira_search_by_labels",
-        description: "Search tickets by specific labels (rg for regressions, SprintGoal, etc.) with status breakdown. Returns count, status distribution, and ticket list per label. Example: quicktext-jira_search_by_labels({project_key: 'QT', labels: ['rg', 'SprintGoal']})",
+        name: "quinta-jira_search_by_labels",
+        description: "Search tickets by specific labels (rg for regressions, SprintGoal, etc.) with status breakdown. Returns count, status distribution, and ticket list per label. Example: quinta-jira_search_by_labels({project_key: 'QT', labels: ['rg', 'SprintGoal']})",
         inputSchema: {
           type: "object",
           properties: {
@@ -823,8 +823,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 9. RATE LIMITS
       {
-        name: "quicktext-jira_get_rate_limits",
-        description: "Check current API rate limit status and remaining quota. Returns limit, remaining requests, reset time, and status (OK/WARNING). Example: quicktext-jira_get_rate_limits({})",
+        name: "quinta-jira_get_rate_limits",
+        description: "Check current API rate limit status and remaining quota. Returns limit, remaining requests, reset time, and status (OK/WARNING). Example: quinta-jira_get_rate_limits({})",
         inputSchema: {
           type: "object",
           properties: {},
@@ -834,8 +834,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 10. GET ALL LABELS
       {
-        name: "quicktext-jira_get_all_labels",
-        description: "Discover labels used in a project with usage counts. Defaults to the project's OPEN SPRINTS (fast, consistent with the other analytics tools). Pass scope:'all' to scan the whole project history (slower; may be truncated on very large projects — check the 'truncated' flag). Example: quicktext-jira_get_all_labels({project_key: 'QT'}) or ({project_key: 'QT', scope: 'all'})",
+        name: "quinta-jira_get_all_labels",
+        description: "Discover labels used in a project with usage counts. Defaults to the project's OPEN SPRINTS (fast, consistent with the other analytics tools). Pass scope:'all' to scan the whole project history (slower; may be truncated on very large projects — check the 'truncated' flag). Example: quinta-jira_get_all_labels({project_key: 'QT'}) or ({project_key: 'QT', scope: 'all'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -857,8 +857,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 11. TIME IN STATUS
       {
-        name: "quicktext-jira_get_time_in_status",
-        description: "Calculate average time issues spend in each status (To Do, In Progress, Done, etc.). Identifies workflow bottlenecks. Example: quicktext-jira_get_time_in_status({project_key: 'QT'})",
+        name: "quinta-jira_get_time_in_status",
+        description: "Calculate average time issues spend in each status (To Do, In Progress, Done, etc.). Identifies workflow bottlenecks. Example: quinta-jira_get_time_in_status({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -874,8 +874,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 12. LIST SPRINTS
       {
-        name: "quicktext-jira_list_sprints",
-        description: "List all sprints in project with status (active/closed/future), start/end dates, and goal. Example: quicktext-jira_list_sprints({project_key: 'QT', board_id: 58})",
+        name: "quinta-jira_list_sprints",
+        description: "List all sprints in project with status (active/closed/future), start/end dates, and goal. Example: quinta-jira_list_sprints({project_key: 'QT', board_id: 58})",
         inputSchema: {
           type: "object",
           properties: {
@@ -895,8 +895,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 13. CREATE ISSUE
       {
-        name: "quicktext-jira_create_issue",
-        description: "Create new Jira issue with full field support. User fields (assignee, tester, reviewer) use Jira DC username (the 'name' field, e.g. 'osg', 'hga'). Example: quicktext-jira_create_issue({project_key: 'QT', summary: 'Bug found', issue_type: 'Bug', assignee: 'osg'})",
+        name: "quinta-jira_create_issue",
+        description: "Create new Jira issue with full field support. User fields (assignee, tester, reviewer) use Jira DC username (the 'name' field, e.g. 'osg', 'hga'). Example: quinta-jira_create_issue({project_key: 'QT', summary: 'Bug found', issue_type: 'Bug', assignee: 'osg'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -983,7 +983,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       
       // 14. UPDATE ISSUE
       {
-        name: "quicktext-jira_update_issue",
+        name: "quinta-jira_update_issue",
         description: `Update existing issue fields. Jira DC field formats:
 - assignee: {"name": "username"} (NOT accountId)
 - priority: {"name": "High"}
@@ -1003,7 +1003,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 - timeOriginalEstimate: "4h" (shorthand, also auto-routed)
 - customfield_10901 (QA Status): {"id": "OPTION_ID"} (use option ID, not value name)
 For sprint assignment, use move_to_sprint tool instead.
-Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {name: 'osg'}}})`,
+Example: quinta-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {name: 'osg'}}})`,
         inputSchema: {
           type: "object",
           properties: {
@@ -1022,8 +1022,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 15. TRANSITION ISSUE
       {
-        name: "quicktext-jira_transition_issue",
-        description: "Change issue status (To Do → In Progress → Done, etc.). Use get_transitions to see available transitions first. Pass `fields` to set values that live on the transition screen (e.g. resolution) — these cannot be set via update_issue. Example: quicktext-jira_transition_issue({issue_key: 'QT-123', transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
+        name: "quinta-jira_transition_issue",
+        description: "Change issue status (To Do → In Progress → Done, etc.). Use get_transitions to see available transitions first. Pass `fields` to set values that live on the transition screen (e.g. resolution) — these cannot be set via update_issue. Example: quinta-jira_transition_issue({issue_key: 'QT-123', transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1033,7 +1033,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
             },
             transition_id: {
               type: "string",
-              description: "Transition ID (get from quicktext-jira_get_transitions)",
+              description: "Transition ID (get from quinta-jira_get_transitions)",
             },
             fields: {
               type: "object",
@@ -1047,8 +1047,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 16. ADD COMMENT
       {
-        name: "quicktext-jira_add_comment",
-        description: "Add comment to issue. The body is sent verbatim as Jira Server/DC wiki markup (e.g. *bold*, {code}…{code}); plain text works as-is. Returns comment ID. Example: quicktext-jira_add_comment({issue_key: 'QT-123', body: 'This is fixed now'})",
+        name: "quinta-jira_add_comment",
+        description: "Add comment to issue. The body is sent verbatim as Jira Server/DC wiki markup (e.g. *bold*, {code}…{code}); plain text works as-is. Returns comment ID. Example: quinta-jira_add_comment({issue_key: 'QT-123', body: 'This is fixed now'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1067,8 +1067,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 17. ADD ATTACHMENT
       {
-        name: "quicktext-jira_add_attachment",
-        description: "Add a file attachment to an issue from base64-encoded content. Example: quicktext-jira_add_attachment({issue_key: 'QT-123', filename: 'screenshot.png', content_base64: '...'})",
+        name: "quinta-jira_add_attachment",
+        description: "Add a file attachment to an issue from base64-encoded content. Example: quinta-jira_add_attachment({issue_key: 'QT-123', filename: 'screenshot.png', content_base64: '...'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1091,8 +1091,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 18. GET EPIC CHILDREN
       {
-        name: "quicktext-jira_get_epic_children",
-        description: "Get all issues linked to an epic with full details. Includes story points, assignees, status. Example: quicktext-jira_get_epic_children({epic_key: 'QT-1000'})",
+        name: "quinta-jira_get_epic_children",
+        description: "Get all issues linked to an epic with full details. Includes story points, assignees, status. Example: quinta-jira_get_epic_children({epic_key: 'QT-1000'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1112,8 +1112,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 19. GET TRANSITIONS
       {
-        name: "quicktext-jira_get_transitions",
-        description: "Get available status transitions for an issue (what statuses it can move to). Required before calling transition_issue. Example: quicktext-jira_get_transitions({issue_key: 'QT-123'})",
+        name: "quinta-jira_get_transitions",
+        description: "Get available status transitions for an issue (what statuses it can move to). Required before calling transition_issue. Example: quinta-jira_get_transitions({issue_key: 'QT-123'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1128,8 +1128,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 20. GET CUSTOM FIELDS
       {
-        name: "quicktext-jira_get_custom_fields",
-        description: "Discover all custom field IDs and names in QuickText Jira. Useful for understanding field mapping (customfield_10023 = Story point estimate, etc.). Example: quicktext-jira_get_custom_fields({})",
+        name: "quinta-jira_get_custom_fields",
+        description: "Discover all custom field IDs and names in QuickText Jira. Useful for understanding field mapping (customfield_10023 = Story point estimate, etc.). Example: quinta-jira_get_custom_fields({})",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1139,8 +1139,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 21. SEARCH BY ASSIGNEE
       {
-        name: "quicktext-jira_search_by_assignee",
-        description: "Find all tickets assigned to specific user(s) in current sprint. Supports multiple assignees. Example: quicktext-jira_search_by_assignee({project_key: 'QT', assignee_names: ['John Doe']})",
+        name: "quinta-jira_search_by_assignee",
+        description: "Find all tickets assigned to specific user(s) in current sprint. Supports multiple assignees. Example: quinta-jira_search_by_assignee({project_key: 'QT', assignee_names: ['John Doe']})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1161,8 +1161,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 22. GET STATUS DISTRIBUTION
       {
-        name: "quicktext-jira_get_status_distribution",
-        description: "Analyze ticket distribution across statuses (To Do, In Progress, Done, etc.) for current sprint. Shows percentages and counts. Example: quicktext-jira_get_status_distribution({project_key: 'QT'})",
+        name: "quinta-jira_get_status_distribution",
+        description: "Analyze ticket distribution across statuses (To Do, In Progress, Done, etc.) for current sprint. Shows percentages and counts. Example: quinta-jira_get_status_distribution({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1178,8 +1178,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 23. GET REPORTER STATS
       {
-        name: "quicktext-jira_get_reporter_stats",
-        description: "Analyze who creates the most tickets (reporters) in current sprint. Shows counts, percentages, and top reporters. Example: quicktext-jira_get_reporter_stats({project_key: 'QT'})",
+        name: "quinta-jira_get_reporter_stats",
+        description: "Analyze who creates the most tickets (reporters) in current sprint. Shows counts, percentages, and top reporters. Example: quinta-jira_get_reporter_stats({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1195,8 +1195,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 24-30: Additional productivity tools
       {
-        name: "quicktext-jira_get_issue_links",
-        description: "Get all linked issues (blocks, is blocked by, relates to, duplicates, etc.). Shows relationship types and linked issue details. Example: quicktext-jira_get_issue_links({issue_key: 'QT-123'})",
+        name: "quinta-jira_get_issue_links",
+        description: "Get all linked issues (blocks, is blocked by, relates to, duplicates, etc.). Shows relationship types and linked issue details. Example: quinta-jira_get_issue_links({issue_key: 'QT-123'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1209,8 +1209,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_issue_history",
-        description: "Get complete change history for an issue (who changed what and when). Includes field changes, status transitions, assignments. Example: quicktext-jira_get_issue_history({issue_key: 'QT-123'})",
+        name: "quinta-jira_get_issue_history",
+        description: "Get complete change history for an issue (who changed what and when). Includes field changes, status transitions, assignments. Example: quinta-jira_get_issue_history({issue_key: 'QT-123'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1223,8 +1223,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_sprint_velocity",
-        description: "Calculate sprint velocity (story points completed per sprint) over last N sprints. Helps with capacity planning. Example: quicktext-jira_get_sprint_velocity({project_key: 'QT', sprint_count: 5})",
+        name: "quinta-jira_get_sprint_velocity",
+        description: "Calculate sprint velocity (story points completed per sprint) over last N sprints. Helps with capacity planning. Example: quinta-jira_get_sprint_velocity({project_key: 'QT', sprint_count: 5})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1252,8 +1252,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_blocked_tickets",
-        description: "Find all tickets currently blocked or with 'blocked' status. Critical for identifying sprint impediments. Example: quicktext-jira_get_blocked_tickets({project_key: 'QT'})",
+        name: "quinta-jira_get_blocked_tickets",
+        description: "Find all tickets currently blocked or with 'blocked' status. Critical for identifying sprint impediments. Example: quinta-jira_get_blocked_tickets({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1267,8 +1267,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_priority_breakdown",
-        description: "Analyze ticket distribution by priority (Highest, High, Medium, Low). Shows counts and percentages. Example: quicktext-jira_get_priority_breakdown({project_key: 'QT'})",
+        name: "quinta-jira_get_priority_breakdown",
+        description: "Analyze ticket distribution by priority (Highest, High, Medium, Low). Shows counts and percentages. Example: quinta-jira_get_priority_breakdown({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1282,8 +1282,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_component_breakdown",
-        description: "Analyze tickets by component (Backend, Frontend, QA, etc.). Identifies which components have most issues. Example: quicktext-jira_get_component_breakdown({project_key: 'QT'})",
+        name: "quinta-jira_get_component_breakdown",
+        description: "Analyze tickets by component (Backend, Frontend, QA, etc.). Identifies which components have most issues. Example: quinta-jira_get_component_breakdown({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1297,8 +1297,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_bulk_transition",
-        description: "Transition multiple issues to same status at once. Efficient for batch operations. Pass `fields` to set transition-screen values (e.g. resolution) on every issue in the batch. Example: quicktext-jira_bulk_transition({issue_keys: ['QT-1', 'QT-2'], transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
+        name: "quinta-jira_bulk_transition",
+        description: "Transition multiple issues to same status at once. Efficient for batch operations. Pass `fields` to set transition-screen values (e.g. resolution) on every issue in the batch. Example: quinta-jira_bulk_transition({issue_keys: ['QT-1', 'QT-2'], transition_id: '2', fields: {resolution: {name: \"Won't Do\"}}})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1323,8 +1323,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 31. GET SPRINT KPI DATA
       {
-        name: "quicktext-jira_get_sprint_kpi_data",
-        description: "Fetch comprehensive sprint KPI data including time tracking, test/review frequencies, and role assignments. Returns all data needed for sprint analytics dashboards. Example: quicktext-jira_get_sprint_kpi_data({project_key: 'QT', sprint_name: 'Sprint 191'})",
+        name: "quinta-jira_get_sprint_kpi_data",
+        description: "Fetch comprehensive sprint KPI data including time tracking, test/review frequencies, and role assignments. Returns all data needed for sprint analytics dashboards. Example: quinta-jira_get_sprint_kpi_data({project_key: 'QT', sprint_name: 'Sprint 191'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1349,8 +1349,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 32. LIST BOARDS (Discovery Suite)
       {
-        name: "quicktext-jira_list_boards",
-        description: "Discover Scrum/Kanban boards. Use this to find board_ids. Filters: name, project_key. Example: quicktext-jira_list_boards({name: 'QT Board', project_key: 'QT'})",
+        name: "quinta-jira_list_boards",
+        description: "Discover Scrum/Kanban boards. Use this to find board_ids. Filters: name, project_key. Example: quinta-jira_list_boards({name: 'QT Board', project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1368,8 +1368,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 33. GET BOARD (Discovery Suite)
       {
-        name: "quicktext-jira_get_board",
-        description: "Get configuration and column details for a specific board. Returns board type, location, and configuration including workflow columns. Example: quicktext-jira_get_board({board_id: 58})",
+        name: "quinta-jira_get_board",
+        description: "Get configuration and column details for a specific board. Returns board type, location, and configuration including workflow columns. Example: quinta-jira_get_board({board_id: 58})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1384,8 +1384,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
       
       // 34. GET SPRINT (Discovery Suite)
       {
-        name: "quicktext-jira_get_sprint",
-        description: "Get full details of a specific sprint including duration metrics and state. Returns sprint dates, goal, state (active/closed/future), and calculated working days. Example: quicktext-jira_get_sprint({sprint_id: 184})",
+        name: "quinta-jira_get_sprint",
+        description: "Get full details of a specific sprint including duration metrics and state. Returns sprint dates, goal, state (active/closed/future), and calculated working days. Example: quinta-jira_get_sprint({sprint_id: 184})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1400,8 +1400,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 35. GET TESTER WORKLOAD
       {
-        name: "quicktext-jira_get_tester_workload",
-        description: "Show workload distribution across testers in the current sprint, grouped by tester name. Reads customfield_10018 (Tester field). Example: quicktext-jira_get_tester_workload({project_key: 'QT'})",
+        name: "quinta-jira_get_tester_workload",
+        description: "Show workload distribution across testers in the current sprint, grouped by tester name. Reads customfield_10018 (Tester field). Example: quinta-jira_get_tester_workload({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1417,8 +1417,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 36. GET REVIEWER WORKLOAD
       {
-        name: "quicktext-jira_get_reviewer_workload",
-        description: "Show workload distribution across reviewers in the current sprint, grouped by reviewer name. Reads customfield_10020 (Reviewed By field). Example: quicktext-jira_get_reviewer_workload({project_key: 'QT'})",
+        name: "quinta-jira_get_reviewer_workload",
+        description: "Show workload distribution across reviewers in the current sprint, grouped by reviewer name. Reads customfield_10020 (Reviewed By field). Example: quinta-jira_get_reviewer_workload({project_key: 'QT'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1434,8 +1434,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 37. GET ISSUE WORKLOGS
       {
-        name: "quicktext-jira_get_issue_worklogs",
-        description: "Get all work log entries for a specific issue showing who logged time, how much, and when. Returns individual worklog records with author details and time spent. Example: quicktext-jira_get_issue_worklogs({issue_key: 'QT-14006'})",
+        name: "quinta-jira_get_issue_worklogs",
+        description: "Get all work log entries for a specific issue showing who logged time, how much, and when. Returns individual worklog records with author details and time spent. Example: quinta-jira_get_issue_worklogs({issue_key: 'QT-14006'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1450,8 +1450,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 38. GET BULK WORKLOGS
       {
-        name: "quicktext-jira_get_bulk_worklogs",
-        description: "Get worklogs across multiple issues aggregated by author. Shows who actually logged time (not just ticket assignee). Supports filtering by sprint name or date range. WARNING: Makes one API call per issue, use max_issues to limit. Example: quicktext-jira_get_bulk_worklogs({project_key: 'QT', sprint_name: 'QUIC Sprint 198'})",
+        name: "quinta-jira_get_bulk_worklogs",
+        description: "Get worklogs across multiple issues aggregated by author. Shows who actually logged time (not just ticket assignee). Supports filtering by sprint name or date range. WARNING: Makes one API call per issue, use max_issues to limit. Example: quinta-jira_get_bulk_worklogs({project_key: 'QT', sprint_name: 'QUIC Sprint 198'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1483,8 +1483,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 39. GET ISSUE CYCLE TIME
       {
-        name: "quicktext-jira_get_issue_cycle_time",
-        description: "Calculate cycle time and time-in-status for sprint issues using changelog data. Shows how long tickets spent in each status, identifies bottleneck statuses, and provides per-assignee cycle times. WARNING: Makes one API call per issue. Example: quicktext-jira_get_issue_cycle_time({project_key: 'QT', sprint_name: 'QUIC Sprint 198'})",
+        name: "quinta-jira_get_issue_cycle_time",
+        description: "Calculate cycle time and time-in-status for sprint issues using changelog data. Shows how long tickets spent in each status, identifies bottleneck statuses, and provides per-assignee cycle times. WARNING: Makes one API call per issue. Example: quinta-jira_get_issue_cycle_time({project_key: 'QT', sprint_name: 'QUIC Sprint 198'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1506,8 +1506,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
         },
       },
       {
-        name: "quicktext-jira_get_mentions",
-        description: "Find all issues where a user was @mentioned in comments within a time window. Uses two-step approach: JQL candidate fetch + comment-level [~username] markup scan. Required because Jira DC 9.4 has no native JQL mention operator. Default window: last 2 weeks. Example: quicktext-jira_get_mentions({username_key: 'jam', project_key: 'QT', since: '-2w'})",
+        name: "quinta-jira_get_mentions",
+        description: "Find all issues where a user was @mentioned in comments within a time window. Uses two-step approach: JQL candidate fetch + comment-level [~username] markup scan. Required because Jira DC 9.4 has no native JQL mention operator. Default window: last 2 weeks. Example: quinta-jira_get_mentions({username_key: 'jam', project_key: 'QT', since: '-2w'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1536,8 +1536,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 41. DELETE ISSUE
       {
-        name: "quicktext-jira_delete_issue",
-        description: "Delete an issue from Jira. Use with caution — this is irreversible. Example: quicktext-jira_delete_issue({issue_key: 'QT-99999', delete_subtasks: true})",
+        name: "quinta-jira_delete_issue",
+        description: "Delete an issue from Jira. Use with caution — this is irreversible. Example: quinta-jira_delete_issue({issue_key: 'QT-99999', delete_subtasks: true})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1557,8 +1557,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 42. MOVE TO SPRINT
       {
-        name: "quicktext-jira_move_to_sprint",
-        description: "Move one or more issues to a sprint using the Agile API. Use list_sprints to find sprint IDs. Example: quicktext-jira_move_to_sprint({sprint_id: 308, issue_keys: ['QT-123', 'QT-456']})",
+        name: "quinta-jira_move_to_sprint",
+        description: "Move one or more issues to a sprint using the Agile API. Use list_sprints to find sprint IDs. Example: quinta-jira_move_to_sprint({sprint_id: 308, issue_keys: ['QT-123', 'QT-456']})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1578,8 +1578,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 43. MOVE TO BACKLOG
       {
-        name: "quicktext-jira_move_to_backlog",
-        description: "Move issues to the backlog (remove from any sprint). Example: quicktext-jira_move_to_backlog({issue_keys: ['QT-123']})",
+        name: "quinta-jira_move_to_backlog",
+        description: "Move issues to the backlog (remove from any sprint). Example: quinta-jira_move_to_backlog({issue_keys: ['QT-123']})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1595,8 +1595,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 44. ADD ISSUE LINK
       {
-        name: "quicktext-jira_add_issue_link",
-        description: "Create a link between two issues. Link types: 'Blocks' (outward: blocks / inward: is blocked by), 'Duplicate' (outward: duplicates / inward: is duplicated by), 'Relates' (relates to). Example: quicktext-jira_add_issue_link({link_type: 'Blocks', inward_issue: 'QT-100', outward_issue: 'QT-200'})",
+        name: "quinta-jira_add_issue_link",
+        description: "Create a link between two issues. Link types: 'Blocks' (outward: blocks / inward: is blocked by), 'Duplicate' (outward: duplicates / inward: is duplicated by), 'Relates' (relates to). Example: quinta-jira_add_issue_link({link_type: 'Blocks', inward_issue: 'QT-100', outward_issue: 'QT-200'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1623,8 +1623,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 45. ADD WATCHER
       {
-        name: "quicktext-jira_add_watcher",
-        description: "Add a user as watcher to an issue. Example: quicktext-jira_add_watcher({issue_key: 'QT-123', username: 'osg'})",
+        name: "quinta-jira_add_watcher",
+        description: "Add a user as watcher to an issue. Example: quinta-jira_add_watcher({issue_key: 'QT-123', username: 'osg'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1643,8 +1643,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 46. REMOVE WATCHER
       {
-        name: "quicktext-jira_remove_watcher",
-        description: "Remove a user from watchers of an issue. Example: quicktext-jira_remove_watcher({issue_key: 'QT-123', username: 'osg'})",
+        name: "quinta-jira_remove_watcher",
+        description: "Remove a user from watchers of an issue. Example: quinta-jira_remove_watcher({issue_key: 'QT-123', username: 'osg'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1663,8 +1663,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 47. GET WATCHERS
       {
-        name: "quicktext-jira_get_watchers",
-        description: "Get all watchers of an issue. Example: quicktext-jira_get_watchers({issue_key: 'QT-123'})",
+        name: "quinta-jira_get_watchers",
+        description: "Get all watchers of an issue. Example: quinta-jira_get_watchers({issue_key: 'QT-123'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1679,7 +1679,7 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 48. GET ISSUE LINK TYPES
       {
-        name: "quicktext-jira_get_link_types",
+        name: "quinta-jira_get_link_types",
         description: "Get all available issue link types (Blocks, Duplicate, Relates, etc.). Use before add_issue_link to find correct link type names.",
         inputSchema: {
           type: "object",
@@ -1689,8 +1689,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 49. ASSIGN ISSUE
       {
-        name: "quicktext-jira_assign_issue",
-        description: "Assign an issue to a user using Jira DC's dedicated assignment endpoint. More reliable than update_issue for assignee changes. Use username=null to unassign. Example: quicktext-jira_assign_issue({issue_key: 'QT-123', username: 'osg'})",
+        name: "quinta-jira_assign_issue",
+        description: "Assign an issue to a user using Jira DC's dedicated assignment endpoint. More reliable than update_issue for assignee changes. Use username=null to unassign. Example: quinta-jira_assign_issue({issue_key: 'QT-123', username: 'osg'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1709,8 +1709,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 50. RANK ISSUES
       {
-        name: "quicktext-jira_rank_issues",
-        description: "Reorder issues in the backlog/sprint by ranking them before or after another issue. Example: quicktext-jira_rank_issues({issue_keys: ['QT-100'], rank_before: 'QT-200'})",
+        name: "quinta-jira_rank_issues",
+        description: "Reorder issues in the backlog/sprint by ranking them before or after another issue. Example: quinta-jira_rank_issues({issue_keys: ['QT-100'], rank_before: 'QT-200'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1734,8 +1734,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 51. LIST ATTACHMENTS
       {
-        name: "quicktext-jira_list_attachments",
-        description: "List all attachments on a Jira issue with metadata (id, filename, mime_type, size_bytes, download URL, thumbnail URL). Returns empty array when the issue has no attachments. Example: quicktext-jira_list_attachments({issue_key: 'QT-15415'})",
+        name: "quinta-jira_list_attachments",
+        description: "List all attachments on a Jira issue with metadata (id, filename, mime_type, size_bytes, download URL, thumbnail URL). Returns empty array when the issue has no attachments. Example: quinta-jira_list_attachments({issue_key: 'QT-15415'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1750,14 +1750,14 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 52. GET ATTACHMENT
       {
-        name: "quicktext-jira_get_attachment",
-        description: "Download a specific attachment by its ID. Images (PNG/JPEG/GIF/WEBP) are returned as native MCP image blocks so Claude can see them directly. Small text files are returned as decoded text. PDFs and other binaries are returned as base64 in a text block. Example: quicktext-jira_get_attachment({attachment_id: '202820'})",
+        name: "quinta-jira_get_attachment",
+        description: "Download a specific attachment by its ID. Images (PNG/JPEG/GIF/WEBP) are returned as native MCP image blocks so Claude can see them directly. Small text files are returned as decoded text. PDFs and other binaries are returned as base64 in a text block. Example: quinta-jira_get_attachment({attachment_id: '202820'})",
         inputSchema: {
           type: "object",
           properties: {
             attachment_id: {
               type: "string",
-              description: "Attachment ID from quicktext-jira_list_attachments (e.g., '202820')",
+              description: "Attachment ID from quinta-jira_list_attachments (e.g., '202820')",
             },
             max_size_mb: {
               type: ["number", "string"],
@@ -1771,8 +1771,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 53. GET ISSUE ATTACHMENTS BULK
       {
-        name: "quicktext-jira_get_issue_attachments_bulk",
-        description: "Download all image attachments from an issue in one call (up to 5 images). Returns native MCP image blocks so Claude can see the images directly. Ideal for viewing all visual specs on a ticket. Example: quicktext-jira_get_issue_attachments_bulk({issue_key: 'QT-15415'})",
+        name: "quinta-jira_get_issue_attachments_bulk",
+        description: "Download all image attachments from an issue in one call (up to 5 images). Returns native MCP image blocks so Claude can see the images directly. Ideal for viewing all visual specs on a ticket. Example: quinta-jira_get_issue_attachments_bulk({issue_key: 'QT-15415'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1799,8 +1799,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 54. SEARCH PAGES
       {
-        name: "quicktext-confluence_search_pages",
-        description: "Search Confluence pages using CQL (Confluence Query Language). Returns matching pages with id, title, space, and last-updated date. Example: quicktext-confluence_search_pages({cql: 'space=DEV AND title~\"onboarding\"', limit: 10})",
+        name: "quinta-confluence_search_pages",
+        description: "Search Confluence pages using CQL (Confluence Query Language). Returns matching pages with id, title, space, and last-updated date. Example: quinta-confluence_search_pages({cql: 'space=DEV AND title~\"onboarding\"', limit: 10})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1814,8 +1814,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 55. GET PAGE
       {
-        name: "quicktext-confluence_get_page",
-        description: "Get full details of a Confluence page by its ID, including body content, version, space, and parent. Example: quicktext-confluence_get_page({page_id: '123456'})",
+        name: "quinta-confluence_get_page",
+        description: "Get full details of a Confluence page by its ID, including body content, version, space, and parent. Example: quinta-confluence_get_page({page_id: '123456'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1828,8 +1828,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 56. GET PAGE BY TITLE
       {
-        name: "quicktext-confluence_get_page_by_title",
-        description: "Find a Confluence page by space key and exact title. Returns the page with its ID, version and content. Example: quicktext-confluence_get_page_by_title({space_key: 'DEV', title: 'Architecture Overview'})",
+        name: "quinta-confluence_get_page_by_title",
+        description: "Find a Confluence page by space key and exact title. Returns the page with its ID, version and content. Example: quinta-confluence_get_page_by_title({space_key: 'DEV', title: 'Architecture Overview'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1842,8 +1842,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 57. GET CHILD PAGES
       {
-        name: "quicktext-confluence_get_child_pages",
-        description: "Get all direct child pages of a Confluence page. Useful for navigating a space's page hierarchy. Example: quicktext-confluence_get_child_pages({page_id: '123456'})",
+        name: "quinta-confluence_get_child_pages",
+        description: "Get all direct child pages of a Confluence page. Useful for navigating a space's page hierarchy. Example: quinta-confluence_get_child_pages({page_id: '123456'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1856,8 +1856,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 58. LIST SPACES
       {
-        name: "quicktext-confluence_list_spaces",
-        description: "List all available Confluence spaces with their keys, names, types and status. Example: quicktext-confluence_list_spaces({})",
+        name: "quinta-confluence_list_spaces",
+        description: "List all available Confluence spaces with their keys, names, types and status. Example: quinta-confluence_list_spaces({})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1870,8 +1870,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 59. GET SPACE
       {
-        name: "quicktext-confluence_get_space",
-        description: "Get details of a specific Confluence space including description and homepage. Example: quicktext-confluence_get_space({space_key: 'DEV'})",
+        name: "quinta-confluence_get_space",
+        description: "Get details of a specific Confluence space including description and homepage. Example: quinta-confluence_get_space({space_key: 'DEV'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1883,8 +1883,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 60. GET PAGE LABELS
       {
-        name: "quicktext-confluence_get_page_labels",
-        description: "Get all labels attached to a Confluence page. Example: quicktext-confluence_get_page_labels({page_id: '123456'})",
+        name: "quinta-confluence_get_page_labels",
+        description: "Get all labels attached to a Confluence page. Example: quinta-confluence_get_page_labels({page_id: '123456'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1896,8 +1896,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 61. SEARCH BY LABEL
       {
-        name: "quicktext-confluence_search_by_label",
-        description: "Find all Confluence pages tagged with a specific label. Example: quicktext-confluence_search_by_label({label: 'architecture', space_key: 'DEV'})",
+        name: "quinta-confluence_search_by_label",
+        description: "Find all Confluence pages tagged with a specific label. Example: quinta-confluence_search_by_label({label: 'architecture', space_key: 'DEV'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1911,8 +1911,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 62. GET PAGE COMMENTS
       {
-        name: "quicktext-confluence_get_page_comments",
-        description: "Get all comments on a Confluence page with author and date. Example: quicktext-confluence_get_page_comments({page_id: '123456'})",
+        name: "quinta-confluence_get_page_comments",
+        description: "Get all comments on a Confluence page with author and date. Example: quinta-confluence_get_page_comments({page_id: '123456'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1925,8 +1925,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 63. GET PAGE HISTORY
       {
-        name: "quicktext-confluence_get_page_history",
-        description: "Get the version history of a Confluence page, showing who changed it and when. Example: quicktext-confluence_get_page_history({page_id: '123456', limit: 10})",
+        name: "quinta-confluence_get_page_history",
+        description: "Get the version history of a Confluence page, showing who changed it and when. Example: quinta-confluence_get_page_history({page_id: '123456', limit: 10})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1939,8 +1939,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 64. GET CURRENT USER
       {
-        name: "quicktext-confluence_get_current_user",
-        description: "Get the profile of the currently authenticated Confluence user. Useful to verify connectivity and identity. Example: quicktext-confluence_get_current_user({})",
+        name: "quinta-confluence_get_current_user",
+        description: "Get the profile of the currently authenticated Confluence user. Useful to verify connectivity and identity. Example: quinta-confluence_get_current_user({})",
         inputSchema: {
           type: "object",
           properties: {},
@@ -1950,8 +1950,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 65. CREATE PAGE
       {
-        name: "quicktext-confluence_create_page",
-        description: "Create a new Confluence page in a space. Body must be Confluence XHTML storage format (e.g., '<p>Hello world</p>'). Example: quicktext-confluence_create_page({space_key: 'DEV', title: 'My New Page', body: '<p>Content here</p>'})",
+        name: "quinta-confluence_create_page",
+        description: "Create a new Confluence page in a space. Body must be Confluence XHTML storage format (e.g., '<p>Hello world</p>'). Example: quinta-confluence_create_page({space_key: 'DEV', title: 'My New Page', body: '<p>Content here</p>'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1966,8 +1966,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 66. UPDATE PAGE
       {
-        name: "quicktext-confluence_update_page",
-        description: "Update an existing Confluence page. Requires the current version number (get it from quicktext-confluence_get_page first). Body must be XHTML storage format. Example: quicktext-confluence_update_page({page_id: '123456', title: 'Updated Title', body: '<p>New content</p>', version: 3})",
+        name: "quinta-confluence_update_page",
+        description: "Update an existing Confluence page. Requires the current version number (get it from quinta-confluence_get_page first). Body must be XHTML storage format. Example: quinta-confluence_update_page({page_id: '123456', title: 'Updated Title', body: '<p>New content</p>', version: 3})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1983,8 +1983,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 67. ADD PAGE COMMENT
       {
-        name: "quicktext-confluence_add_page_comment",
-        description: "Add a comment to a Confluence page. Accepts plain text — it is automatically converted to storage format. Example: quicktext-confluence_add_page_comment({page_id: '123456', body: 'Great documentation!'})",
+        name: "quinta-confluence_add_page_comment",
+        description: "Add a comment to a Confluence page. Accepts plain text — it is automatically converted to storage format. Example: quinta-confluence_add_page_comment({page_id: '123456', body: 'Great documentation!'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1997,8 +1997,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 68. ADD PAGE LABEL
       {
-        name: "quicktext-confluence_add_page_label",
-        description: "Add a label to a Confluence page. Example: quicktext-confluence_add_page_label({page_id: '123456', label: 'needs-review'})",
+        name: "quinta-confluence_add_page_label",
+        description: "Add a label to a Confluence page. Example: quinta-confluence_add_page_label({page_id: '123456', label: 'needs-review'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -2011,8 +2011,8 @@ Example: quicktext-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {n
 
       // 69. MOVE PAGE
       {
-        name: "quicktext-confluence_move_page",
-        description: "Move a Confluence page to a different parent within the SAME space (e.g. reorganise the QUIC page tree). Cross-space moves are NOT supported by the Confluence Server REST API — those must be done via the UI (open page → ··· → Move). Example: quicktext-confluence_move_page({page_id: '123456', target_parent_id: '789012'})",
+        name: "quinta-confluence_move_page",
+        description: "Move a Confluence page to a different parent within the SAME space (e.g. reorganise the QUIC page tree). Cross-space moves are NOT supported by the Confluence Server REST API — those must be done via the UI (open page → ··· → Move). Example: quinta-confluence_move_page({page_id: '123456', target_parent_id: '789012'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -2036,7 +2036,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       // 1. GET FULL ISSUE
-      case "quicktext-jira_get_full_issue": {
+      case "quinta-jira_get_full_issue": {
         const { issue_key } = args;
         
         if (!issue_key) {
@@ -2105,7 +2105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 2. SEARCH SPRINT ISSUES
-      case "quicktext-jira_search_sprint_issues": {
+      case "quinta-jira_search_sprint_issues": {
         const { project_key, sprint_name, max_results = 500 } = args;
 
         const escProject = escapeJqlValue(project_key);
@@ -2155,7 +2155,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 3. TEAM WORKLOAD
-      case "quicktext-jira_get_team_workload": {
+      case "quinta-jira_get_team_workload": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() ORDER BY assignee ASC`;
@@ -2192,7 +2192,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 4. ANALYZE HOTFIXES
-      case "quicktext-jira_analyze_hotfixes": {
+      case "quinta-jira_analyze_hotfixes": {
         const { project_key } = args;
         
         const escProject = escapeJqlValue(project_key);
@@ -2237,7 +2237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 5. ADVANCED SEARCH
-      case "quicktext-jira_search_advanced": {
+      case "quinta-jira_search_advanced": {
         const { jql, max_results = 100 } = args;
         
         if (!jql) {
@@ -2281,7 +2281,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 6. TIME METRICS
-      case "quicktext-jira_get_time_metrics": {
+      case "quinta-jira_get_time_metrics": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -2329,7 +2329,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 7. UNASSIGNED BY ROLE
-      case "quicktext-jira_get_unassigned_by_role": {
+      case "quinta-jira_get_unassigned_by_role": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -2367,7 +2367,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 8. SEARCH BY LABELS
-      case "quicktext-jira_search_by_labels": {
+      case "quinta-jira_search_by_labels": {
         const { project_key, labels } = args;
         
         if (!labels || labels.length === 0) {
@@ -2410,7 +2410,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 9. RATE LIMITS
-      case "quicktext-jira_get_rate_limits": {
+      case "quinta-jira_get_rate_limits": {
         // Rate-limit info is populated only if the server sends X-RateLimit-* headers.
         // Self-hosted Jira Data Center typically does NOT emit these headers, so the
         // values stay null — report that honestly rather than a bare "Unknown".
@@ -2436,7 +2436,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 10. GET ALL LABELS
-      case "quicktext-jira_get_all_labels": {
+      case "quinta-jira_get_all_labels": {
         const { project_key, scope = "open_sprints" } = args;
 
         // Default to open sprints (fast, consistent with sibling analytics tools).
@@ -2475,7 +2475,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 11. TIME IN STATUS
-      case "quicktext-jira_get_time_in_status": {
+      case "quinta-jira_get_time_in_status": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -2529,7 +2529,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 12. LIST SPRINTS
-      case "quicktext-jira_list_sprints": {
+      case "quinta-jira_list_sprints": {
         const { project_key, board_id } = args;
         
         if (!board_id) {
@@ -2595,7 +2595,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 13. CREATE ISSUE
-      case "quicktext-jira_create_issue": {
+      case "quinta-jira_create_issue": {
         const {
           project_key, summary, description, issue_type = "Task", priority,
           assignee, labels, time_estimate, reviewer_key, tester_key,
@@ -2740,7 +2740,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 14. UPDATE ISSUE
-      case "quicktext-jira_update_issue": {
+      case "quinta-jira_update_issue": {
         const { issue_key, fields } = args;
 
         if (!isValidIssueKey(issue_key)) {
@@ -2846,7 +2846,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 15. TRANSITION ISSUE
-      case "quicktext-jira_transition_issue": {
+      case "quinta-jira_transition_issue": {
         const { issue_key, transition_id, fields } = args;
 
         if (!isValidIssueKey(issue_key)) {
@@ -2857,7 +2857,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ErrorCodes.MISSING_REQUIRED_FIELD,
             "transition_id is required",
             {},
-            "Use quicktext-jira_get_transitions to get available transition IDs"
+            "Use quinta-jira_get_transitions to get available transition IDs"
           );
         }
 
@@ -2889,7 +2889,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 16. ADD COMMENT
-      case "quicktext-jira_add_comment": {
+      case "quinta-jira_add_comment": {
         const { issue_key, body } = args;
 
         if (!isValidIssueKey(issue_key)) {
@@ -2923,7 +2923,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 17. ADD ATTACHMENT
-      case "quicktext-jira_add_attachment": {
+      case "quinta-jira_add_attachment": {
         const { issue_key, filename, content_base64 } = args;
 
         if (!filename || !content_base64) {
@@ -2993,7 +2993,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 18. GET EPIC CHILDREN
-      case "quicktext-jira_get_epic_children": {
+      case "quinta-jira_get_epic_children": {
         const { epic_key, max_results = 100 } = args;
 
         const jql = `"Epic Link" = "${escapeJqlValue(epic_key)}"`;
@@ -3025,7 +3025,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 19. GET TRANSITIONS
-      case "quicktext-jira_get_transitions": {
+      case "quinta-jira_get_transitions": {
         const { issue_key } = args;
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}/transitions`);
@@ -3049,7 +3049,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 20. GET CUSTOM FIELDS
-      case "quicktext-jira_get_custom_fields": {
+      case "quinta-jira_get_custom_fields": {
         const data = await jiraRequest("/rest/api/2/field");
 
         const customFields = data
@@ -3075,7 +3075,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 21. SEARCH BY ASSIGNEE
-      case "quicktext-jira_search_by_assignee": {
+      case "quinta-jira_search_by_assignee": {
         const { project_key, assignee_names } = args;
         
         if (!assignee_names || assignee_names.length === 0) {
@@ -3116,7 +3116,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 22. GET STATUS DISTRIBUTION
-      case "quicktext-jira_get_status_distribution": {
+      case "quinta-jira_get_status_distribution": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3152,7 +3152,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 23. GET REPORTER STATS
-      case "quicktext-jira_get_reporter_stats": {
+      case "quinta-jira_get_reporter_stats": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3191,7 +3191,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 24. GET ISSUE LINKS
-      case "quicktext-jira_get_issue_links": {
+      case "quinta-jira_get_issue_links": {
         const { issue_key } = args;
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}`);
@@ -3230,7 +3230,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 25. GET ISSUE HISTORY
-      case "quicktext-jira_get_issue_history": {
+      case "quinta-jira_get_issue_history": {
         const { issue_key } = args;
         
         const data = await jiraRequest(`/rest/api/2/issue/${issue_key}?expand=changelog`);
@@ -3261,7 +3261,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 26. GET SPRINT VELOCITY
-      case "quicktext-jira_get_sprint_velocity": {
+      case "quinta-jira_get_sprint_velocity": {
         const { project_key, board_id } = args;
         const spField: string = args.story_points_field || "customfield_10023";
         const sprintCount = Math.max(1, Number(args.sprint_count) > 0 ? Number(args.sprint_count) : 3);
@@ -3344,7 +3344,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 27. GET BLOCKED TICKETS
-      case "quicktext-jira_get_blocked_tickets": {
+      case "quinta-jira_get_blocked_tickets": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints() AND (status = Blocked OR labels = blocked)`;
@@ -3373,7 +3373,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 28. GET PRIORITY BREAKDOWN
-      case "quicktext-jira_get_priority_breakdown": {
+      case "quinta-jira_get_priority_breakdown": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3409,7 +3409,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 29. GET COMPONENT BREAKDOWN
-      case "quicktext-jira_get_component_breakdown": {
+      case "quinta-jira_get_component_breakdown": {
         const { project_key } = args;
         
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3449,7 +3449,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 30. BULK TRANSITION
-      case "quicktext-jira_bulk_transition": {
+      case "quinta-jira_bulk_transition": {
         const { issue_keys, transition_id, fields } = args;
 
         if (!issue_keys || issue_keys.length === 0) {
@@ -3503,7 +3503,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 31. GET SPRINT KPI DATA
-      case "quicktext-jira_get_sprint_kpi_data": {
+      case "quinta-jira_get_sprint_kpi_data": {
         const { project_key, sprint_name, max_results = 1000 } = args;
 
         const escProject = escapeJqlValue(project_key);
@@ -3579,7 +3579,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 32. LIST BOARDS (Discovery Suite)
-      case "quicktext-jira_list_boards": {
+      case "quinta-jira_list_boards": {
         const { name, project_key } = args;
         const params = new URLSearchParams();
         
@@ -3608,7 +3608,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 33. GET BOARD (Discovery Suite)
-      case "quicktext-jira_get_board": {
+      case "quinta-jira_get_board": {
         const { board_id } = args;
         
         if (!board_id) {
@@ -3645,7 +3645,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 34. GET SPRINT (Discovery Suite)
-      case "quicktext-jira_get_sprint": {
+      case "quinta-jira_get_sprint": {
         const { sprint_id } = args;
         
         if (!sprint_id) {
@@ -3688,7 +3688,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 35. GET TESTER WORKLOAD
-      case "quicktext-jira_get_tester_workload": {
+      case "quinta-jira_get_tester_workload": {
         const { project_key } = args;
 
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3748,7 +3748,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 36. GET REVIEWER WORKLOAD
-      case "quicktext-jira_get_reviewer_workload": {
+      case "quinta-jira_get_reviewer_workload": {
         const { project_key } = args;
 
         const jql = `project = "${escapeJqlValue(project_key)}" AND sprint in openSprints()`;
@@ -3808,7 +3808,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 37. GET ISSUE WORKLOGS
-      case "quicktext-jira_get_issue_worklogs": {
+      case "quinta-jira_get_issue_worklogs": {
         const { issue_key } = args;
 
         if (!issue_key) {
@@ -3864,7 +3864,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 38. GET BULK WORKLOGS
-      case "quicktext-jira_get_bulk_worklogs": {
+      case "quinta-jira_get_bulk_worklogs": {
         const { project_key, sprint_name, date_from, date_to, max_issues = 200 } = args;
 
         // Build JQL
@@ -3959,7 +3959,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 39. GET ISSUE CYCLE TIME
-      case "quicktext-jira_get_issue_cycle_time": {
+      case "quinta-jira_get_issue_cycle_time": {
         const { project_key, sprint_name, max_issues = 100 } = args;
 
         // Step 1: Build JQL and get sprint issues
@@ -4100,7 +4100,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 40. GET MENTIONS
-      case "quicktext-jira_get_mentions": {
+      case "quinta-jira_get_mentions": {
         const username_key = args.username_key;
         if (!username_key) {
           throw createError(
@@ -4212,7 +4212,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 41. DELETE ISSUE
-      case "quicktext-jira_delete_issue": {
+      case "quinta-jira_delete_issue": {
         const { issue_key, delete_subtasks = false } = args;
         const deleteUrl = `/rest/api/2/issue/${issue_key}?deleteSubtasks=${delete_subtasks}`;
         await jiraRequest(deleteUrl, { method: "DELETE" });
@@ -4225,7 +4225,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 42. MOVE TO SPRINT
-      case "quicktext-jira_move_to_sprint": {
+      case "quinta-jira_move_to_sprint": {
         const { sprint_id, issue_keys } = args;
         if (!issue_keys || issue_keys.length === 0) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
@@ -4245,7 +4245,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 43. MOVE TO BACKLOG
-      case "quicktext-jira_move_to_backlog": {
+      case "quinta-jira_move_to_backlog": {
         const { issue_keys: backlogIssues } = args;
         if (!backlogIssues || backlogIssues.length === 0) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
@@ -4264,7 +4264,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 44. ADD ISSUE LINK
-      case "quicktext-jira_add_issue_link": {
+      case "quinta-jira_add_issue_link": {
         const { link_type, inward_issue, outward_issue, comment: linkComment } = args;
         const linkPayload: any = {
           type: { name: link_type },
@@ -4287,7 +4287,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 45. ADD WATCHER
-      case "quicktext-jira_add_watcher": {
+      case "quinta-jira_add_watcher": {
         const { issue_key: watchIssue, username: watchUser } = args;
         // Jira DC expects the username as a plain JSON string in the body
         await jiraRequest(`/rest/api/2/issue/${watchIssue}/watchers`, {
@@ -4303,7 +4303,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 46. REMOVE WATCHER
-      case "quicktext-jira_remove_watcher": {
+      case "quinta-jira_remove_watcher": {
         const { issue_key: unwatchIssue, username: unwatchUser } = args;
         await jiraRequest(`/rest/api/2/issue/${unwatchIssue}/watchers?username=${encodeURIComponent(unwatchUser)}`, {
           method: "DELETE",
@@ -4317,7 +4317,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 47. GET WATCHERS
-      case "quicktext-jira_get_watchers": {
+      case "quinta-jira_get_watchers": {
         const { issue_key: watchersIssue } = args;
         const watchersData = await jiraRequest(`/rest/api/2/issue/${watchersIssue}/watchers`);
         return {
@@ -4336,7 +4336,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 48. GET ISSUE LINK TYPES
-      case "quicktext-jira_get_link_types": {
+      case "quinta-jira_get_link_types": {
         const linkTypesData = await jiraRequest(`/rest/api/2/issueLinkType`);
         return {
           content: [{ type: "text", text: JSON.stringify({
@@ -4352,7 +4352,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 49. ASSIGN ISSUE (dedicated endpoint)
-      case "quicktext-jira_assign_issue": {
+      case "quinta-jira_assign_issue": {
         const { issue_key: assignIssue, username: assignUser } = args;
         // Use the dedicated assign endpoint — more reliable than PUT /fields/assignee on DC
         await jiraRequest(`/rest/api/2/issue/${assignIssue}/assignee`, {
@@ -4370,7 +4370,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 50. RANK ISSUES
-      case "quicktext-jira_rank_issues": {
+      case "quinta-jira_rank_issues": {
         const { issue_keys: rankIssues, rank_before, rank_after } = args;
         if (!rankIssues || rankIssues.length === 0) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_keys array is required");
@@ -4395,7 +4395,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 51. LIST ATTACHMENTS
-      case "quicktext-jira_list_attachments": {
+      case "quinta-jira_list_attachments": {
         const { issue_key: listAttIssueKey } = args;
         if (!listAttIssueKey) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required");
@@ -4423,7 +4423,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 52. GET ATTACHMENT
-      case "quicktext-jira_get_attachment": {
+      case "quinta-jira_get_attachment": {
         const { attachment_id, max_size_mb = 10 } = args;
         if (!attachment_id) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "attachment_id is required");
@@ -4493,7 +4493,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 53. GET ISSUE ATTACHMENTS BULK
-      case "quicktext-jira_get_issue_attachments_bulk": {
+      case "quinta-jira_get_issue_attachments_bulk": {
         const { issue_key: bulkIssueKey, max_size_mb: bulkMaxMb = 10, max_images = 5 } = args;
         if (!bulkIssueKey) {
           throw createError(ErrorCodes.MISSING_REQUIRED_FIELD, "issue_key is required");
@@ -4566,7 +4566,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // ─── Confluence Cases ──────────────────────────────────────────────────
 
       // 54. SEARCH PAGES
-      case "quicktext-confluence_search_pages": {
+      case "quinta-confluence_search_pages": {
         const { cql, limit = 25, start = 0 } = args;
         if (!cql) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "cql is required", {}, "Provide a CQL query, e.g. 'space=DEV AND type=page'");
         const data = await confluenceRequest(`/rest/api/content/search?cql=${encodeURIComponent(String(cql))}&limit=${limit}&start=${start}&expand=space,version,history,history.lastUpdated`);
@@ -4595,7 +4595,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 55. GET PAGE
-      case "quicktext-confluence_get_page": {
+      case "quinta-confluence_get_page": {
         const { page_id, include_body = true } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         const expand = include_body
@@ -4629,7 +4629,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 56. GET PAGE BY TITLE
-      case "quicktext-confluence_get_page_by_title": {
+      case "quinta-confluence_get_page_by_title": {
         const { space_key, title } = args;
         if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
         if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
@@ -4661,7 +4661,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 57. GET CHILD PAGES
-      case "quicktext-confluence_get_child_pages": {
+      case "quinta-confluence_get_child_pages": {
         const { page_id, limit = 25 } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         const data = await confluenceRequest(`/rest/api/content/${page_id}/child/page?expand=version,space&limit=${limit}`);
@@ -4685,7 +4685,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 58. LIST SPACES
-      case "quicktext-confluence_list_spaces": {
+      case "quinta-confluence_list_spaces": {
         const { limit = 50, type } = args;
         const typeFilter = type ? `&type=${encodeURIComponent(String(type))}` : '';
         const data = await confluenceRequest(`/rest/api/space?expand=description.plain&limit=${limit}${typeFilter}`);
@@ -4709,7 +4709,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 59. GET SPACE
-      case "quicktext-confluence_get_space": {
+      case "quinta-confluence_get_space": {
         const { space_key } = args;
         if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
         const data = await confluenceRequest(`/rest/api/space/${space_key}?expand=description.plain,homepage`);
@@ -4734,7 +4734,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 60. GET PAGE LABELS
-      case "quicktext-confluence_get_page_labels": {
+      case "quinta-confluence_get_page_labels": {
         const { page_id } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         const data = await confluenceRequest(`/rest/api/content/${page_id}/label`);
@@ -4751,7 +4751,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 61. SEARCH BY LABEL
-      case "quicktext-confluence_search_by_label": {
+      case "quinta-confluence_search_by_label": {
         const { label, space_key, limit = 25 } = args;
         if (!label) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "label is required");
         const spaceFilter = space_key ? ` AND space="${escapeCqlValue(space_key)}"` : '';
@@ -4779,7 +4779,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 62. GET PAGE COMMENTS
-      case "quicktext-confluence_get_page_comments": {
+      case "quinta-confluence_get_page_comments": {
         const { page_id, limit = 50 } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         const data = await confluenceRequest(`/rest/api/content/${page_id}/child/comment?expand=body.storage,version,history&limit=${limit}`);
@@ -4803,7 +4803,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 63. GET PAGE HISTORY
-      case "quicktext-confluence_get_page_history": {
+      case "quinta-confluence_get_page_history": {
         const { page_id, limit = 10 } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
 
@@ -4877,7 +4877,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 64. GET CURRENT USER
-      case "quicktext-confluence_get_current_user": {
+      case "quinta-confluence_get_current_user": {
         const data = await confluenceRequest(`/rest/api/user/current`);
         return {
           content: [{
@@ -4897,7 +4897,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 65. CREATE PAGE
-      case "quicktext-confluence_create_page": {
+      case "quinta-confluence_create_page": {
         const { space_key, title, body, parent_id } = args;
         if (!space_key) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "space_key is required");
         if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
@@ -4930,12 +4930,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 66. UPDATE PAGE
-      case "quicktext-confluence_update_page": {
+      case "quinta-confluence_update_page": {
         const { page_id, title, body, version, version_message } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         if (!title) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "title is required");
         if (!body) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "body is required");
-        if (!version) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "version is required — get it from quicktext-confluence_get_page first");
+        if (!version) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "version is required — get it from quinta-confluence_get_page first");
 
         const payload: any = {
           id: String(page_id),
@@ -4964,7 +4964,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 67. ADD PAGE COMMENT
-      case "quicktext-confluence_add_page_comment": {
+      case "quinta-confluence_add_page_comment": {
         const { page_id, body } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         if (!body) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "body is required");
@@ -4991,7 +4991,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 68. ADD PAGE LABEL
-      case "quicktext-confluence_add_page_label": {
+      case "quinta-confluence_add_page_label": {
         const { page_id, label } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         if (!label) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "label is required");
@@ -5013,7 +5013,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // 69. MOVE PAGE
-      case "quicktext-confluence_move_page": {
+      case "quinta-confluence_move_page": {
         const { page_id, target_space_key, target_parent_id } = args;
         if (!page_id) throw createError(ConfluenceErrorCodes.MISSING_REQUIRED, "page_id is required");
         if (!target_space_key && !target_parent_id) {
@@ -5092,7 +5092,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ErrorCodes.INVALID_PARAMETER,
           `Unknown tool: ${name}`,
           { tool_name: name },
-          "Check tool name spelling. Tools start with quicktext-jira_ or quicktext-confluence_"
+          "Check tool name spelling. Tools start with quinta-jira_ or quinta-confluence_"
         );
     }
   } catch (error: any) {

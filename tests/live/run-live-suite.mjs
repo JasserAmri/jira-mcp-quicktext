@@ -114,60 +114,60 @@ function classify(resp) {
 // Each test: { name, tool, args, needs:[cfgKeys] } ; readonly unless in writes flow.
 const readTests = [
   // no-arg
-  { name: "rate limits", tool: "quicktext-jira_get_rate_limits", args: {} },
-  { name: "custom fields", tool: "quicktext-jira_get_custom_fields", args: {} },
-  { name: "list boards", tool: "quicktext-jira_list_boards", args: {} },
-  { name: "link types", tool: "quicktext-jira_get_link_types", args: {} },
+  { name: "rate limits", tool: "quinta-jira_get_rate_limits", args: {} },
+  { name: "custom fields", tool: "quinta-jira_get_custom_fields", args: {} },
+  { name: "list boards", tool: "quinta-jira_list_boards", args: {} },
+  { name: "link types", tool: "quinta-jira_get_link_types", args: {} },
   // project-scoped (exercises the new pagination paths)
-  { name: "team workload", tool: "quicktext-jira_get_team_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "status distribution", tool: "quicktext-jira_get_status_distribution", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "reporter stats", tool: "quicktext-jira_get_reporter_stats", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "priority breakdown", tool: "quicktext-jira_get_priority_breakdown", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "component breakdown", tool: "quicktext-jira_get_component_breakdown", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "all labels", tool: "quicktext-jira_get_all_labels", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "unassigned by role", tool: "quicktext-jira_get_unassigned_by_role", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "time metrics", tool: "quicktext-jira_get_time_metrics", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "time in status", tool: "quicktext-jira_get_time_in_status", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "tester workload", tool: "quicktext-jira_get_tester_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "reviewer workload", tool: "quicktext-jira_get_reviewer_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "list sprints", tool: "quicktext-jira_list_sprints", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "search sprint issues", tool: "quicktext-jira_search_sprint_issues", args: { project_key: cfg.projectKey, max_results: 5 }, needs: ["projectKey"] },
-  { name: "analyze hotfixes", tool: "quicktext-jira_analyze_hotfixes", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "sprint kpi data", tool: "quicktext-jira_get_sprint_kpi_data", args: { project_key: cfg.projectKey, max_results: 5 }, needs: ["projectKey"] },
-  { name: "blocked tickets", tool: "quicktext-jira_get_blocked_tickets", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "bulk worklogs", tool: "quicktext-jira_get_bulk_worklogs", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "sprint velocity", tool: "quicktext-jira_get_sprint_velocity", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "issue cycle time", tool: "quicktext-jira_get_issue_cycle_time", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
-  { name: "search by labels", tool: "quicktext-jira_search_by_labels", args: { project_key: cfg.projectKey, labels: [cfg.label] }, needs: ["projectKey"] },
-  { name: "search by assignee", tool: "quicktext-jira_search_by_assignee", args: { project_key: cfg.projectKey, assignee_names: [cfg.assigneeName] }, needs: ["projectKey", "assigneeName"] },
+  { name: "team workload", tool: "quinta-jira_get_team_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "status distribution", tool: "quinta-jira_get_status_distribution", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "reporter stats", tool: "quinta-jira_get_reporter_stats", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "priority breakdown", tool: "quinta-jira_get_priority_breakdown", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "component breakdown", tool: "quinta-jira_get_component_breakdown", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "all labels", tool: "quinta-jira_get_all_labels", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "unassigned by role", tool: "quinta-jira_get_unassigned_by_role", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "time metrics", tool: "quinta-jira_get_time_metrics", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "time in status", tool: "quinta-jira_get_time_in_status", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "tester workload", tool: "quinta-jira_get_tester_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "reviewer workload", tool: "quinta-jira_get_reviewer_workload", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "list sprints", tool: "quinta-jira_list_sprints", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "search sprint issues", tool: "quinta-jira_search_sprint_issues", args: { project_key: cfg.projectKey, max_results: 5 }, needs: ["projectKey"] },
+  { name: "analyze hotfixes", tool: "quinta-jira_analyze_hotfixes", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "sprint kpi data", tool: "quinta-jira_get_sprint_kpi_data", args: { project_key: cfg.projectKey, max_results: 5 }, needs: ["projectKey"] },
+  { name: "blocked tickets", tool: "quinta-jira_get_blocked_tickets", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "bulk worklogs", tool: "quinta-jira_get_bulk_worklogs", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "sprint velocity", tool: "quinta-jira_get_sprint_velocity", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "issue cycle time", tool: "quinta-jira_get_issue_cycle_time", args: { project_key: cfg.projectKey }, needs: ["projectKey"] },
+  { name: "search by labels", tool: "quinta-jira_search_by_labels", args: { project_key: cfg.projectKey, labels: [cfg.label] }, needs: ["projectKey"] },
+  { name: "search by assignee", tool: "quinta-jira_search_by_assignee", args: { project_key: cfg.projectKey, assignee_names: [cfg.assigneeName] }, needs: ["projectKey", "assigneeName"] },
   // issue-scoped
-  { name: "full issue", tool: "quicktext-jira_get_full_issue", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "transitions", tool: "quicktext-jira_get_transitions", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "issue links", tool: "quicktext-jira_get_issue_links", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "issue history", tool: "quicktext-jira_get_issue_history", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "issue worklogs", tool: "quicktext-jira_get_issue_worklogs", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "watchers", tool: "quicktext-jira_get_watchers", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "list attachments", tool: "quicktext-jira_list_attachments", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
-  { name: "issue attachments bulk", tool: "quicktext-jira_get_issue_attachments_bulk", args: { issue_key: cfg.issueKey, max_images: 2 }, needs: ["issueKey"] },
+  { name: "full issue", tool: "quinta-jira_get_full_issue", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "transitions", tool: "quinta-jira_get_transitions", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "issue links", tool: "quinta-jira_get_issue_links", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "issue history", tool: "quinta-jira_get_issue_history", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "issue worklogs", tool: "quinta-jira_get_issue_worklogs", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "watchers", tool: "quinta-jira_get_watchers", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "list attachments", tool: "quinta-jira_list_attachments", args: { issue_key: cfg.issueKey }, needs: ["issueKey"] },
+  { name: "issue attachments bulk", tool: "quinta-jira_get_issue_attachments_bulk", args: { issue_key: cfg.issueKey, max_images: 2 }, needs: ["issueKey"] },
   // misc read
-  { name: "search advanced", tool: "quicktext-jira_search_advanced", args: { jql: cfg.projectKey ? `project = "${cfg.projectKey}" ORDER BY created DESC` : "ORDER BY created DESC", max_results: 3 }, needs: ["projectKey"] },
-  { name: "epic children", tool: "quicktext-jira_get_epic_children", args: { epic_key: cfg.epicKey }, needs: ["epicKey"] },
-  { name: "mentions", tool: "quicktext-jira_get_mentions", args: { username_key: cfg.usernameKey, project_key: cfg.projectKey, since: "-1w" }, needs: ["usernameKey"] },
-  { name: "get board", tool: "quicktext-jira_get_board", args: { board_id: cfg.boardId }, needs: ["boardId"] },
-  { name: "get sprint", tool: "quicktext-jira_get_sprint", args: { sprint_id: cfg.sprintId }, needs: ["sprintId"] },
-  { name: "get attachment", tool: "quicktext-jira_get_attachment", args: { attachment_id: cfg.attachmentId }, needs: ["attachmentId"] },
+  { name: "search advanced", tool: "quinta-jira_search_advanced", args: { jql: cfg.projectKey ? `project = "${cfg.projectKey}" ORDER BY created DESC` : "ORDER BY created DESC", max_results: 3 }, needs: ["projectKey"] },
+  { name: "epic children", tool: "quinta-jira_get_epic_children", args: { epic_key: cfg.epicKey }, needs: ["epicKey"] },
+  { name: "mentions", tool: "quinta-jira_get_mentions", args: { username_key: cfg.usernameKey, project_key: cfg.projectKey, since: "-1w" }, needs: ["usernameKey"] },
+  { name: "get board", tool: "quinta-jira_get_board", args: { board_id: cfg.boardId }, needs: ["boardId"] },
+  { name: "get sprint", tool: "quinta-jira_get_sprint", args: { sprint_id: cfg.sprintId }, needs: ["sprintId"] },
+  { name: "get attachment", tool: "quinta-jira_get_attachment", args: { attachment_id: cfg.attachmentId }, needs: ["attachmentId"] },
   // Confluence reads
-  { name: "conf: list spaces", tool: "quicktext-confluence_list_spaces", args: {} },
-  { name: "conf: current user", tool: "quicktext-confluence_get_current_user", args: {} },
-  { name: "conf: search pages", tool: "quicktext-confluence_search_pages", args: { cql: cfg.cql || (cfg.spaceKey ? `space="${cfg.spaceKey}" AND type=page` : "type=page"), limit: 5 } },
-  { name: "conf: get space", tool: "quicktext-confluence_get_space", args: { space_key: cfg.spaceKey }, needs: ["spaceKey"] },
-  { name: "conf: get page", tool: "quicktext-confluence_get_page", args: { page_id: cfg.pageId }, needs: ["pageId"] },
-  { name: "conf: page by title", tool: "quicktext-confluence_get_page_by_title", args: { space_key: cfg.spaceKey, title: cfg.pageTitle }, needs: ["spaceKey", "pageTitle"] },
-  { name: "conf: child pages", tool: "quicktext-confluence_get_child_pages", args: { page_id: cfg.pageId }, needs: ["pageId"] },
-  { name: "conf: page labels", tool: "quicktext-confluence_get_page_labels", args: { page_id: cfg.pageId }, needs: ["pageId"] },
-  { name: "conf: page comments", tool: "quicktext-confluence_get_page_comments", args: { page_id: cfg.pageId }, needs: ["pageId"] },
-  { name: "conf: page history", tool: "quicktext-confluence_get_page_history", args: { page_id: cfg.pageId, limit: 5 }, needs: ["pageId"] },
-  { name: "conf: search by label", tool: "quicktext-confluence_search_by_label", args: { label: cfg.label, space_key: cfg.spaceKey } },
+  { name: "conf: list spaces", tool: "quinta-confluence_list_spaces", args: {} },
+  { name: "conf: current user", tool: "quinta-confluence_get_current_user", args: {} },
+  { name: "conf: search pages", tool: "quinta-confluence_search_pages", args: { cql: cfg.cql || (cfg.spaceKey ? `space="${cfg.spaceKey}" AND type=page` : "type=page"), limit: 5 } },
+  { name: "conf: get space", tool: "quinta-confluence_get_space", args: { space_key: cfg.spaceKey }, needs: ["spaceKey"] },
+  { name: "conf: get page", tool: "quinta-confluence_get_page", args: { page_id: cfg.pageId }, needs: ["pageId"] },
+  { name: "conf: page by title", tool: "quinta-confluence_get_page_by_title", args: { space_key: cfg.spaceKey, title: cfg.pageTitle }, needs: ["spaceKey", "pageTitle"] },
+  { name: "conf: child pages", tool: "quinta-confluence_get_child_pages", args: { page_id: cfg.pageId }, needs: ["pageId"] },
+  { name: "conf: page labels", tool: "quinta-confluence_get_page_labels", args: { page_id: cfg.pageId }, needs: ["pageId"] },
+  { name: "conf: page comments", tool: "quinta-confluence_get_page_comments", args: { page_id: cfg.pageId }, needs: ["pageId"] },
+  { name: "conf: page history", tool: "quinta-confluence_get_page_history", args: { page_id: cfg.pageId, limit: 5 }, needs: ["pageId"] },
+  { name: "conf: search by label", tool: "quinta-confluence_search_by_label", args: { label: cfg.label, space_key: cfg.spaceKey } },
 ];
 
 const results = [];
@@ -212,19 +212,19 @@ async function main() {
     } else {
       let createdKey = null;
       try {
-        const create = await rpc(child, "tools/call", { name: "quicktext-jira_create_issue", arguments: { project_key: cfg.projectKey, summary: "[MCP LIVE TEST] safe to delete", issue_type: env.TEST_ISSUE_TYPE || "Task", labels: [cfg.label] } });
+        const create = await rpc(child, "tools/call", { name: "quinta-jira_create_issue", arguments: { project_key: cfg.projectKey, summary: "[MCP LIVE TEST] safe to delete", issue_type: env.TEST_ISSUE_TYPE || "Task", labels: [cfg.label] } });
         const cc = classify(create);
         record("create issue", cc.ok ? "PASS" : "FAIL", cc.note);
         createdKey = cc.ok ? (cc.payload?.issue_key) : null;
         if (createdKey) {
-          await runTest(child, { name: "add comment", tool: "quicktext-jira_add_comment", args: { issue_key: createdKey, body: "MCP live-test comment" } });
-          await runTest(child, { name: "update issue", tool: "quicktext-jira_update_issue", args: { issue_key: createdKey, fields: { summary: "[MCP LIVE TEST] updated" } } });
-          await runTest(child, { name: "add attachment", tool: "quicktext-jira_add_attachment", args: { issue_key: createdKey, filename: "livetest.txt", content_base64: Buffer.from("hello from mcp live test").toString("base64") } });
-          await runTest(child, { name: "list attachments (created)", tool: "quicktext-jira_list_attachments", args: { issue_key: createdKey } });
+          await runTest(child, { name: "add comment", tool: "quinta-jira_add_comment", args: { issue_key: createdKey, body: "MCP live-test comment" } });
+          await runTest(child, { name: "update issue", tool: "quinta-jira_update_issue", args: { issue_key: createdKey, fields: { summary: "[MCP LIVE TEST] updated" } } });
+          await runTest(child, { name: "add attachment", tool: "quinta-jira_add_attachment", args: { issue_key: createdKey, filename: "livetest.txt", content_base64: Buffer.from("hello from mcp live test").toString("base64") } });
+          await runTest(child, { name: "list attachments (created)", tool: "quinta-jira_list_attachments", args: { issue_key: createdKey } });
         }
       } finally {
         if (createdKey) {
-          const del = await rpc(child, "tools/call", { name: "quicktext-jira_delete_issue", arguments: { issue_key: createdKey } });
+          const del = await rpc(child, "tools/call", { name: "quinta-jira_delete_issue", arguments: { issue_key: createdKey } });
           const dc = classify(del);
           record(`cleanup: delete ${createdKey}`, dc.ok ? "PASS" : "FAIL", dc.ok ? "deleted" : dc.note + " (DELETE MANUALLY)");
         }
@@ -240,13 +240,13 @@ async function main() {
       record("conf write flow", "SKIP", "set TEST_SPACE_KEY");
     } else {
       const pageTitle = `MCP live test page ${new Date().toISOString()}`;
-      const create = await rpc(child, "tools/call", { name: "quicktext-confluence_create_page", arguments: { space_key: cfg.spaceKey, title: pageTitle, body: "<p>MCP live test — safe to delete</p>" } });
+      const create = await rpc(child, "tools/call", { name: "quinta-confluence_create_page", arguments: { space_key: cfg.spaceKey, title: pageTitle, body: "<p>MCP live test — safe to delete</p>" } });
       const cc = classify(create);
       record("conf: create page", cc.ok ? "PASS" : "FAIL", cc.note);
       const pid = cc.ok ? cc.payload?.page_id : null;
       if (pid) {
-        await runTest(child, { name: "conf: add comment", tool: "quicktext-confluence_add_page_comment", args: { page_id: pid, body: "MCP live-test comment" } });
-        await runTest(child, { name: "conf: add label", tool: "quicktext-confluence_add_page_label", args: { page_id: pid, label: cfg.label } });
+        await runTest(child, { name: "conf: add comment", tool: "quinta-confluence_add_page_comment", args: { page_id: pid, body: "MCP live-test comment" } });
+        await runTest(child, { name: "conf: add label", tool: "quinta-confluence_add_page_label", args: { page_id: pid, label: cfg.label } });
         record("conf: cleanup", "SKIP", `no delete-page tool — remove page ${pid} manually`);
       }
     }

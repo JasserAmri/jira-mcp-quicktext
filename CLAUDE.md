@@ -13,7 +13,7 @@
 ## How this repo is worked on
 - Claude Code sessions run in a **remote Linux cloud VM** (`/home/user/jira-mcp-quicktext`), which is a
   separate clone from the user's Windows machine. The two only sync via GitHub — Claude pushes, the user pulls.
-- The `quicktext-jira_*` / `quicktext-confluence_*` MCP tools are **not** reachable from the cloud session;
+- The `quinta-jira_*` / `quinta-confluence_*` MCP tools are **not** reachable from the cloud session;
   live tool testing must be done by the user in their Desktop app. Claude verifies code by building and
   booting the server over stdio (`tools/list`), not by calling the live connector.
 - Active development branch: `claude/jira-mcp-confluence-tools-tndasc` (PR #19).
