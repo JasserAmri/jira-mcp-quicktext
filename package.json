@@ -10,7 +10,7 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:live": "node --env-file=.env tests/live/run-live-suite.mjs",
-    "bundle": "npm run build && npx --yes @anthropic-ai/mcpb@latest pack . jira-confluence-quicktext.mcpb"
+    "bundle": "npm run build && npx --yes @anthropic-ai/mcpb@latest pack . jira-confluence-quinta.mcpb"
   },
   "keywords": [
     "mcp",
