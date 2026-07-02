@@ -1,0 +1,85 @@
+{
+  "manifest_version": "0.2",
+  "name": "jira-confluence-quicktext",
+  "display_name": "Jira & Confluence (QuickText)",
+  "version": "5.0.0",
+  "description": "QuickText Jira + Confluence tools for self-hosted Data Center — 69 tools (53 Jira + 16 Confluence). Each user connects with their own Personal Access Token.",
+  "author": {
+    "name": "QuickText"
+  },
+  "license": "MIT",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "build/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/build/index.js"],
+      "env": {
+        "JIRA_BASE_URL": "${user_config.jira_base_url}",
+        "JIRA_API_TOKEN": "${user_config.jira_api_token}",
+        "JIRA_AUTH_TYPE": "${user_config.jira_auth_type}",
+        "JIRA_USER_EMAIL": "${user_config.jira_user_email}",
+        "CONFLUENCE_BASE_URL": "${user_config.confluence_base_url}",
+        "CONFLUENCE_API_TOKEN": "${user_config.confluence_api_token}",
+        "CONFLUENCE_AUTH_TYPE": "${user_config.confluence_auth_type}"
+      }
+    }
+  },
+  "user_config": {
+    "jira_base_url": {
+      "type": "string",
+      "title": "Jira Base URL",
+      "description": "Your self-hosted Jira Data Center URL (no trailing slash).",
+      "default": "https://jira.gotogo.im",
+      "required": true
+    },
+    "jira_api_token": {
+      "type": "string",
+      "title": "Jira Personal Access Token",
+      "description": "Your OWN Jira PAT (Profile → Personal Access Tokens). Stored locally in your OS keychain — never shared.",
+      "sensitive": true,
+      "required": true
+    },
+    "jira_auth_type": {
+      "type": "string",
+      "title": "Jira Auth Type",
+      "description": "\"bearer\" for a Personal Access Token (default), or \"basic\" for username+token.",
+      "default": "bearer",
+      "required": false
+    },
+    "jira_user_email": {
+      "type": "string",
+      "title": "Jira Username/Email (basic auth only)",
+      "description": "Only needed if Jira Auth Type is \"basic\". Leave blank for bearer/PAT.",
+      "default": "",
+      "required": false
+    },
+    "confluence_base_url": {
+      "type": "string",
+      "title": "Confluence Base URL",
+      "description": "Your self-hosted Confluence URL. Leave the token blank below to disable Confluence tools.",
+      "default": "https://confluence.gotogo.im",
+      "required": false
+    },
+    "confluence_api_token": {
+      "type": "string",
+      "title": "Confluence Personal Access Token",
+      "description": "Your OWN Confluence PAT. Leave blank to disable Confluence tools. Stored locally in your OS keychain.",
+      "sensitive": true,
+      "required": false
+    },
+    "confluence_auth_type": {
+      "type": "string",
+      "title": "Confluence Auth Type",
+      "description": "\"bearer\" (default) or \"basic\".",
+      "default": "bearer",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "node": ">=18"
+    }
+  }
+}

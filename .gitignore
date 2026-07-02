@@ -7,6 +7,10 @@ coverage/
 .env
 *.tsbuildinfo
 
+# Packed MCPB/DXT extension artifacts (produced by `npm run bundle` / CI release)
+*.mcpb
+*.dxt
+
 # OS generated files #
 ######################
 .DS_Store

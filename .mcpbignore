@@ -1,0 +1,36 @@
+# Keep the .mcpb bundle minimal — build/index.js is fully self-contained,
+# so nothing else (source, deps, tests, docs) needs to ship.
+
+# Source & config (only the built output is needed)
+src/
+tests/
+docs/
+vite.config.ts
+tsconfig.json
+*.map
+*.d.ts
+
+# Dependencies (build/index.js bundles everything; no node_modules required)
+node_modules/
+
+# Lockfiles & package metadata not needed at runtime
+package-lock.json
+bun.lock
+
+# VCS / CI / tooling
+.git/
+.github/
+.gitignore
+.env
+.env.*
+.mcpbignore
+
+# Reports & working docs
+COMPLIANCE_REPORT.md
+PHASE1_TEST_REPORT.md
+CODE_REVIEW.md
+CLAUDE.md
+
+# Any previously built bundles
+*.mcpb
+*.dxt

@@ -1,0 +1,61 @@
+name: Release MCPB extension
+
+# Build the .mcpb bundle and attach it to a GitHub Release so the org can
+# download a fresh artifact. Triggered by pushing a version tag (v*), or
+# manually via the Actions tab.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and attach .mcpb
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build self-contained server
+        run: npm run build
+
+      - name: Pack MCPB bundle
+        run: npx --yes @anthropic-ai/mcpb@latest pack . jira-confluence-quicktext.mcpb
+
+      # Optional signing: if an MCPB_SIGN_CERT / MCPB_SIGN_KEY secret pair is
+      # configured, sign the bundle so Claude Desktop shows it as verified.
+      # Skipped automatically when the secret is absent.
+      - name: Sign MCPB bundle (optional)
+        env:
+          MCPB_SIGN_CERT: ${{ secrets.MCPB_SIGN_CERT }}
+          MCPB_SIGN_KEY: ${{ secrets.MCPB_SIGN_KEY }}
+        if: ${{ env.MCPB_SIGN_CERT != '' }}
+        run: |
+          printf '%s' "$MCPB_SIGN_CERT" > sign-cert.pem
+          printf '%s' "$MCPB_SIGN_KEY" > sign-key.pem
+          npx --yes @anthropic-ai/mcpb@latest sign jira-confluence-quicktext.mcpb \
+            --cert sign-cert.pem --key sign-key.pem
+          rm -f sign-cert.pem sign-key.pem
+
+      - name: Validate the packed bundle
+        run: npx --yes @anthropic-ai/mcpb@latest info jira-confluence-quicktext.mcpb
+
+      - name: Attach bundle to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: jira-confluence-quicktext.mcpb
+          fail_on_unmatched_files: true
+          generate_release_notes: true
