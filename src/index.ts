@@ -260,6 +260,21 @@ function createError(code: string, message: string, details: Record<string, any>
   };
 }
 
+// Consume (or cancel) a fetch Response's body before discarding the Response.
+// Node's built-in fetch (undici) is spec-required to have its body consumed or
+// explicitly cancelled; throwing away a Response without reading the body is a
+// resource-leak risk regardless of Node version/request pattern. Call this
+// before throwing/returning from a branch that doesn't otherwise read the body.
+async function drainResponseBody(response: Response): Promise<void> {
+  try {
+    if (response.body && !response.bodyUsed) {
+      await response.body.cancel();
+    }
+  } catch {
+    // Best-effort cleanup only — never let draining failures mask the real error.
+  }
+}
+
 // Jira API helper with rate limit tracking and error handling
 async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
   const url = `${JIRA_BASE_URL}${endpoint}`;
@@ -509,6 +524,7 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
   });
 
   if (!response.ok) {
+    await drainResponseBody(response);
     throw createError(
       ErrorCodes.JIRA_API_ERROR,
       `Failed to fetch attachment: HTTP ${response.status}`,
@@ -522,6 +538,7 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
   // Honour Content-Length as an early guard before buffering
   const contentLength = response.headers.get("Content-Length");
   if (contentLength && parseInt(contentLength) > maxBytes) {
+    await drainResponseBody(response);
     const sizeMb = (parseInt(contentLength) / 1024 / 1024).toFixed(2);
     const maxMb = (maxBytes / 1024 / 1024).toFixed(0);
     throw createError(
@@ -3117,6 +3134,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             clearTimeout(timer);
           }
           if (!fetchResp.ok) {
+            await drainResponseBody(fetchResp);
             throw createError(
               ErrorCodes.JIRA_API_ERROR,
               `Failed to download source_url: HTTP ${fetchResp.status}`,
