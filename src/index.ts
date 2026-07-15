@@ -45,6 +45,16 @@ const REQUEST_TIMEOUT_MS = Number(process.env.REQUEST_TIMEOUT_MS) > 0
   ? Number(process.env.REQUEST_TIMEOUT_MS)
   : 30000;
 
+// Optional diagnostic logging for every outbound Jira/Confluence HTTP call
+// (method, endpoint, status, duration, error name). Off by default — set
+// JIRA_MCP_DEBUG_HTTP=1 to enable when diagnosing connectivity/hang issues.
+const DEBUG_HTTP = /^(1|true)$/i.test(process.env.JIRA_MCP_DEBUG_HTTP ?? "");
+function debugHttpLog(label: string, method: string, endpoint: string, startedAt: number, status: number | null, errorName: string | null) {
+  if (!DEBUG_HTTP) return;
+  const durationMs = Date.now() - startedAt;
+  console.error(`[JIRA_MCP_DEBUG_HTTP] ${label} ${method} ${endpoint} status=${status ?? "n/a"} duration_ms=${durationMs} error=${errorName ?? "none"}`);
+}
+
 if (!JIRA_BASE_URL || !JIRA_PAT) {
   console.error('ERROR: Missing required environment variables.');
   console.error('  JIRA_BASE_URL and JIRA_API_TOKEN must be set.');
@@ -124,6 +134,23 @@ function confluenceAuthHeader(): string {
   return CONFLUENCE_AUTH_TYPE === 'basic'
     ? `Basic ${Buffer.from(`${CONFLUENCE_USER_EMAIL}:${CONFLUENCE_API_TOKEN}`).toString('base64')}`
     : `Bearer ${CONFLUENCE_API_TOKEN}`;
+}
+
+// Run an async mapper over items with at most `limit` in flight at once, so a
+// single tool call touching many items (e.g. resolving many user tokens on one
+// heavy ticket) can't fan out unbounded concurrent Jira requests.
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 // Escape a user-supplied value before interpolating it into a quoted JQL/CQL string literal.
@@ -278,6 +305,8 @@ async function drainResponseBody(response: Response): Promise<void> {
 // Jira API helper with rate limit tracking and error handling
 async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
   const url = `${JIRA_BASE_URL}${endpoint}`;
+  const method = options.method || "GET";
+  const startedAt = Date.now();
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
@@ -307,7 +336,9 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
     }
 
     if (!response.ok) {
+      debugHttpLog("jiraRequest", method, endpoint, startedAt, response.status, null);
       if (response.status === 401) {
+        await drainResponseBody(response);
         throw createError(
           ErrorCodes.UNAUTHORIZED,
           "Authentication failed",
@@ -315,6 +346,7 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
           "Verify JIRA_PAT token is valid and not expired"
         );
       } else if (response.status === 403) {
+        await drainResponseBody(response);
         throw createError(
           ErrorCodes.FORBIDDEN,
           "Permission denied",
@@ -322,6 +354,7 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
           "Check user permissions for this resource"
         );
       } else if (response.status === 404) {
+        await drainResponseBody(response);
         // Map 404 to the most specific resource error based on the endpoint
         const notFoundCode = /\/project/.test(endpoint)
           ? ErrorCodes.PROJECT_NOT_FOUND
@@ -335,6 +368,7 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
           "Verify issue key, project key, or sprint/board id is correct"
         );
       } else if (response.status === 429) {
+        await drainResponseBody(response);
         throw createError(
           ErrorCodes.RATE_LIMIT_EXCEEDED,
           "Rate limit exceeded",
@@ -355,6 +389,8 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
         );
       }
     }
+
+    debugHttpLog("jiraRequest", method, endpoint, startedAt, response.status, null);
 
     // Handle empty responses (e.g. Jira 204 No Content on transitions)
     const text = await response.text();
@@ -379,6 +415,7 @@ async function jiraRequest(endpoint: string, options: any = {}): Promise<any> {
     if (error.error_code) {
       throw error; // Already a structured error
     }
+    debugHttpLog("jiraRequest", method, endpoint, startedAt, null, error.name || "Error");
     if (error.name === "AbortError") {
       throw createError(
         ErrorCodes.TIMEOUT,
@@ -410,6 +447,8 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
   }
 
   const url = `${CONFLUENCE_BASE_URL}${endpoint}`;
+  const method = options.method || "GET";
+  const startedAt = Date.now();
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
@@ -426,6 +465,7 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
     });
 
     if (!response.ok) {
+      debugHttpLog("confluenceRequest", method, endpoint, startedAt, response.status, null);
       let errorBody: any = null;
       try {
         const errText = await response.text();
@@ -447,6 +487,8 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
       }
     }
 
+    debugHttpLog("confluenceRequest", method, endpoint, startedAt, response.status, null);
+
     const text = await response.text();
     if (!text) return {};
     try {
@@ -461,6 +503,7 @@ async function confluenceRequest(endpoint: string, options: any = {}): Promise<a
     }
   } catch (error: any) {
     if (error.error_code) throw error;
+    debugHttpLog("confluenceRequest", method, endpoint, startedAt, null, error.name || "Error");
     if (error.name === "AbortError") {
       throw createError(ConfluenceErrorCodes.NETWORK_ERROR, `Confluence request timed out after ${REQUEST_TIMEOUT_MS}ms`, { endpoint, timeout_ms: REQUEST_TIMEOUT_MS }, "Increase REQUEST_TIMEOUT_MS or check Confluence server responsiveness");
     }
@@ -692,7 +735,7 @@ function resolveAssigneeRolesCached(customfield10301: any) {
 // Works for any role id, not just dev/test.
 async function resolveRoleFieldEntries(cf: any): Promise<any> {
   if (!Array.isArray(cf)) return cf;
-  return Promise.all(cf.map(async (entry: any) => {
+  return mapWithConcurrency(cf, 5, async (entry: any) => {
     if (typeof entry !== "string") return entry;
     const m = entry.match(/\(([^)]*)\)/);
     const token = (m?.[1] ?? "").trim();
@@ -700,10 +743,11 @@ async function resolveRoleFieldEntries(cf: any): Promise<any> {
     if (!token || token === "null" || token.includes("|")) return entry;
     const name = await resolveUserDisplayName(token);
     return name && name !== token ? entry.replace(/\(([^)]*)\)/, `(${name})`) : entry;
-  }));
+  });
 }
 
-// Resolve (and cache) every dev/test token across a set of issues in parallel.
+// Resolve (and cache) every dev/test token across a set of issues, bounded so a
+// large result set can't fan out unbounded concurrent Jira requests.
 async function prewarmRoleNames(issues: any[]) {
   const tokens = new Set<string>();
   for (const issue of issues) {
@@ -711,7 +755,7 @@ async function prewarmRoleNames(issues: any[]) {
     if (r.dev) tokens.add(r.dev as string);
     if (r.test) tokens.add(r.test as string);
   }
-  await Promise.all([...tokens].map((t) => resolveUserDisplayName(t)));
+  await mapWithConcurrency([...tokens], 5, (t) => resolveUserDisplayName(t));
 }
 
 // Helper: Parse sprint from Jira's Java toString() format
