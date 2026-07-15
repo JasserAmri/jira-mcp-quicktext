@@ -22,7 +22,8 @@
         "JIRA_USER_EMAIL": "${user_config.jira_user_email}",
         "CONFLUENCE_BASE_URL": "${user_config.confluence_base_url}",
         "CONFLUENCE_API_TOKEN": "${user_config.confluence_api_token}",
-        "CONFLUENCE_AUTH_TYPE": "${user_config.confluence_auth_type}"
+        "CONFLUENCE_AUTH_TYPE": "${user_config.confluence_auth_type}",
+        "JIRA_MCP_DEBUG_HTTP": "${user_config.debug_http_logging}"
       }
     }
   },
@@ -74,6 +75,13 @@
       "title": "Confluence Auth Type",
       "description": "\"bearer\" (default) or \"basic\".",
       "default": "bearer",
+      "required": false
+    },
+    "debug_http_logging": {
+      "type": "boolean",
+      "title": "Enable HTTP debug logging",
+      "description": "Logs every outbound Jira/Confluence request (endpoint, status, duration) for troubleshooting connectivity issues. Off by default; only turn on when diagnosing a problem.",
+      "default": false,
       "required": false
     }
   },
