@@ -21,6 +21,11 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname } from "node:path";
+import { PDFParse } from "pdf-parse";
+import { extractRawText as extractDocxRawText } from "mammoth";
+import ExcelJS from "exceljs";
 
 // Jira configuration — read from environment variables (set via .env or MCP client config)
 const JIRA_BASE_URL = (process.env.JIRA_BASE_URL ?? '').replace(/\/$/, '');
@@ -160,6 +165,97 @@ const IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/gif", "
 const TEXT_MIME_PREFIXES = ["text/"];
 const TEXT_MIME_EXACT = ["application/json", "application/xml"];
 const TEXT_SIZE_LIMIT = 500 * 1024;
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const DISABLE_ATTACHMENT_TEXT_EXTRACTION = /^(1|true)$/i.test(process.env.DISABLE_ATTACHMENT_TEXT_EXTRACTION ?? "");
+
+// MIME type by file extension, used when uploading an attachment (file_path/source_url
+// modes have no browser-supplied Content-Type to fall back on).
+const MIME_BY_EXTENSION: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+  ".webp": "image/webp", ".svg": "image/svg+xml", ".bmp": "image/bmp", ".ico": "image/x-icon",
+  ".pdf": "application/pdf",
+  ".doc": "application/msword",
+  ".docx": DOCX_MIME,
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": XLSX_MIME,
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".txt": "text/plain", ".csv": "text/csv", ".md": "text/markdown",
+  ".json": "application/json", ".xml": "application/xml", ".html": "text/html", ".htm": "text/html",
+  ".zip": "application/zip", ".rar": "application/vnd.rar", ".7z": "application/x-7z-compressed",
+  ".mp4": "video/mp4", ".mov": "video/quicktime", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  ".log": "text/plain",
+};
+function guessMimeType(filename: string): string {
+  return MIME_BY_EXTENSION[extname(filename).toLowerCase()] || "application/octet-stream";
+}
+
+// Cap for file_path/source_url attachment uploads, to avoid reading or
+// downloading unbounded amounts of data into memory. Configurable via env.
+const ATTACHMENT_UPLOAD_MAX_BYTES = (() => {
+  const mb = Number(process.env.ATTACHMENT_MAX_UPLOAD_MB);
+  return (Number.isFinite(mb) && mb > 0 ? mb : 100) * 1024 * 1024;
+})();
+
+// Derive a filename from the last path/URL segment (used when the caller
+// omits `filename` alongside file_path/source_url).
+function inferFilenameFromPathOrUrl(pathOrUrl: string): string {
+  try {
+    const asUrl = new URL(pathOrUrl);
+    return basename(asUrl.pathname) || "attachment";
+  } catch {
+    return basename(pathOrUrl) || "attachment";
+  }
+}
+
+// Strip characters that would let a filename break out of the quoted
+// Content-Disposition header value (CR/LF header injection, embedded quotes).
+function sanitizeAttachmentFilename(name: string): string {
+  const base = basename(String(name).replace(/[\r\n]/g, "").trim());
+  const cleaned = base.replace(/"/g, "'");
+  return cleaned || "attachment";
+}
+
+// Best-effort text extraction for common office document formats, so Claude can
+// read attachment contents instead of only seeing an opaque base64 blob.
+// Returns null (falls back to base64) when the MIME type is unsupported, the
+// feature is disabled via DISABLE_ATTACHMENT_TEXT_EXTRACTION, or parsing fails.
+async function extractAttachmentText(buffer: Buffer, mimeType: string): Promise<string | null> {
+  if (DISABLE_ATTACHMENT_TEXT_EXTRACTION) return null;
+  try {
+    if (mimeType === "application/pdf") {
+      const parser = new PDFParse({ data: buffer });
+      try {
+        const result = await parser.getText();
+        return result.text;
+      } finally {
+        await parser.destroy();
+      }
+    }
+    if (mimeType === DOCX_MIME) {
+      const result = await extractDocxRawText({ buffer });
+      return result.value;
+    }
+    if (mimeType === XLSX_MIME) {
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(buffer as any);
+      const sheets: string[] = [];
+      workbook.eachSheet((sheet) => {
+        const rows: string[] = [];
+        sheet.eachRow((row) => {
+          const cells = (row.values as any[]).slice(1).map(v => (v == null ? "" : String(v)));
+          rows.push(cells.join(","));
+        });
+        sheets.push(`--- Sheet: ${sheet.name} ---\n${rows.join("\n")}`);
+      });
+      return sheets.join("\n\n");
+    }
+  } catch (error: any) {
+    return null;
+  }
+  return null;
+}
 
 // Jira issue key shape, e.g. QT-123 (used to validate before interpolating into URLs)
 const ISSUE_KEY_RE = /^[A-Za-z][A-Za-z0-9_]+-\d+$/;
@@ -192,14 +288,10 @@ function createError(code: string, message: string, details: Record<string, any>
 }
 
 // Consume (or cancel) a fetch Response's body before discarding the Response.
-// Node's built-in fetch (undici) will not return a keep-alive connection to
-// its per-origin pool until the body is read or explicitly cancelled — an
-// abandoned, unconsumed body only releases its socket when garbage collected,
-// which is delayed and non-deterministic. Every code path that throws on a
-// non-OK response without reading the body leaks a pooled connection; enough
-// leaks exhaust the pool (or Jira's own reverse-proxy connection cap) and
-// subsequent calls stall until GC reclaims them. Always call this before
-// throwing/returning from a branch that doesn't otherwise read the body.
+// Node's built-in fetch (undici) is spec-required to have its body consumed or
+// explicitly cancelled; throwing away a Response without reading the body is a
+// resource-leak risk regardless of Node version/request pattern. Call this
+// before throwing/returning from a branch that doesn't otherwise read the body.
 async function drainResponseBody(response: Response): Promise<void> {
   try {
     if (response.body && !response.bodyUsed) {
@@ -499,20 +591,49 @@ async function fetchAttachmentBinary(url: string, maxBytes: number): Promise<{ b
     );
   }
 
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
+  const buffer = await readBodyWithSizeCap(response, maxBytes);
 
-  if (buffer.length > maxBytes) {
-    const sizeMb = (buffer.length / 1024 / 1024).toFixed(2);
+  return { buffer, contentType };
+}
+
+// Read a fetch Response body while enforcing a byte cap, without buffering the
+// whole thing first — aborts as soon as the cap is crossed instead of trusting
+// (possibly absent or dishonest) Content-Length.
+async function readBodyWithSizeCap(response: Response, maxBytes: number): Promise<Buffer> {
+  const throwTooLarge = (sizeBytes: number): never => {
+    const sizeMb = (sizeBytes / 1024 / 1024).toFixed(2);
     const maxMb = (maxBytes / 1024 / 1024).toFixed(0);
     throw createError(
       ErrorCodes.INVALID_PARAMETER,
       `File too large to download (${sizeMb} MB). Increase max_size_mb (current: ${maxMb}).`,
-      { size_bytes: buffer.length, max_bytes: maxBytes }
+      { size_bytes: sizeBytes, max_bytes: maxBytes }
     );
+  };
+
+  const body = response.body;
+  if (!body || typeof (body as any).getReader !== "function") {
+    // Fallback for runtimes without a streamable body — still enforce the cap.
+    const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength > maxBytes) throwTooLarge(arrayBuffer.byteLength);
+    return Buffer.from(arrayBuffer);
   }
 
-  return { buffer, contentType };
+  const reader = (body as ReadableStream<Uint8Array>).getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throwTooLarge(total);
+      }
+      chunks.push(value);
+    }
+  }
+  return Buffer.concat(chunks.map(c => Buffer.from(c)), total);
 }
 
 // Helper: Parse time logged by role from customfield_10300
@@ -1133,7 +1254,7 @@ Example: quinta-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {name
       // 17. ADD ATTACHMENT
       {
         name: "quinta-jira_add_attachment",
-        description: "Add a file attachment to an issue from base64-encoded content. Example: quinta-jira_add_attachment({issue_key: 'QT-123', filename: 'screenshot.png', content_base64: '...'})",
+        description: "Add a file attachment to an issue. Provide exactly ONE content source: `file_path` (a local file path on the machine running this server — the best option for files the user already has on disk), `source_url` (the server downloads it), or `content_base64` (raw base64 content). `filename` is inferred from `file_path`/`source_url` when omitted, but is required with `content_base64`. Examples: quinta-jira_add_attachment({issue_key: 'QT-123', file_path: 'C:\\\\Users\\\\me\\\\screenshot.png'}) or quinta-jira_add_attachment({issue_key: 'QT-123', source_url: 'https://example.com/report.pdf'})",
         inputSchema: {
           type: "object",
           properties: {
@@ -1143,14 +1264,22 @@ Example: quinta-jira_update_issue({issue_key: 'QT-123', fields: {assignee: {name
             },
             filename: {
               type: "string",
-              description: "Filename with extension",
+              description: "Filename with extension. Optional with file_path/source_url (inferred); required with content_base64.",
+            },
+            file_path: {
+              type: "string",
+              description: "Absolute local path to the file to upload, read directly by the server.",
+            },
+            source_url: {
+              type: "string",
+              description: "URL to download the file from before attaching it.",
             },
             content_base64: {
               type: "string",
-              description: "Base64 encoded file content",
+              description: "Base64 encoded file content (legacy path — prefer file_path or source_url).",
             },
           },
-          required: ["issue_key", "filename", "content_base64"],
+          required: ["issue_key"],
         },
       },
       
@@ -2989,24 +3118,89 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // 17. ADD ATTACHMENT
       case "quinta-jira_add_attachment": {
-        const { issue_key, filename, content_base64 } = args;
+        const { issue_key, file_path, source_url } = args;
+        let { filename, content_base64 } = args;
 
-        if (!filename || !content_base64) {
+        const sourceCount = [file_path, source_url, content_base64].filter(Boolean).length;
+        if (sourceCount === 0) {
           throw createError(
             ErrorCodes.MISSING_REQUIRED_FIELD,
-            "filename and content_base64 are required"
+            "Provide exactly one content source: file_path, source_url, or content_base64"
+          );
+        }
+        if (sourceCount > 1) {
+          throw createError(
+            ErrorCodes.INVALID_PARAMETER,
+            "Provide only one content source: file_path, source_url, or content_base64 — not more than one"
+          );
+        }
+        if (content_base64 && !filename) {
+          throw createError(
+            ErrorCodes.MISSING_REQUIRED_FIELD,
+            "filename is required when using content_base64"
           );
         }
 
-        const fileBuffer = Buffer.from(content_base64, "base64");
+        let fileBuffer: Buffer;
+        if (file_path) {
+          const stats = await stat(file_path).catch((err: any) => {
+            throw createError(
+              ErrorCodes.INVALID_PARAMETER,
+              `Cannot read file_path: ${err.message}`,
+              { file_path },
+              "Verify the path exists and is readable by the machine running this MCP server"
+            );
+          });
+          if (stats.size > ATTACHMENT_UPLOAD_MAX_BYTES) {
+            throw createError(
+              ErrorCodes.INVALID_PARAMETER,
+              `File too large to upload (${(stats.size / 1024 / 1024).toFixed(2)} MB). Max is ${(ATTACHMENT_UPLOAD_MAX_BYTES / 1024 / 1024).toFixed(0)} MB (configurable via ATTACHMENT_MAX_UPLOAD_MB).`,
+              { size_bytes: stats.size, max_bytes: ATTACHMENT_UPLOAD_MAX_BYTES }
+            );
+          }
+          fileBuffer = await readFile(file_path);
+          filename = filename || inferFilenameFromPathOrUrl(file_path);
+        } else if (source_url) {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), REQUEST_TIMEOUT_MS);
+          let fetchResp: Response;
+          try {
+            fetchResp = await fetch(source_url, { signal: ctrl.signal });
+          } catch (err: any) {
+            throw createError(
+              ErrorCodes.NETWORK_ERROR,
+              err.name === "AbortError"
+                ? `Timed out downloading source_url after ${REQUEST_TIMEOUT_MS}ms`
+                : `Failed to download source_url: ${err.message}`,
+              { source_url }
+            );
+          } finally {
+            clearTimeout(timer);
+          }
+          if (!fetchResp.ok) {
+            await drainResponseBody(fetchResp);
+            throw createError(
+              ErrorCodes.JIRA_API_ERROR,
+              `Failed to download source_url: HTTP ${fetchResp.status}`,
+              { status: fetchResp.status, source_url }
+            );
+          }
+          fileBuffer = await readBodyWithSizeCap(fetchResp, ATTACHMENT_UPLOAD_MAX_BYTES);
+          filename = filename || inferFilenameFromPathOrUrl(source_url);
+        } else {
+          fileBuffer = Buffer.from(content_base64, "base64");
+        }
+
+        const safeFilename = sanitizeAttachmentFilename(filename);
+        const contentType = guessMimeType(safeFilename);
 
         // Build proper multipart/form-data manually (Jira DC requires field name "file")
         const boundary = `----JiraMCPBoundary${Date.now()}`;
         const CRLF = "\r\n";
         const multipartParts = [
           `--${boundary}${CRLF}`,
-          `Content-Disposition: form-data; name="file"; filename="${filename}"${CRLF}`,
-          `Content-Type: application/octet-stream${CRLF}`,
+          `Content-Disposition: form-data; name="file"; filename="${safeFilename}"${CRLF}`,
+          `Content-Type: ${contentType}${CRLF}`,
           CRLF,
         ];
         const headerBuf = Buffer.from(multipartParts.join(""), "utf-8");
@@ -3043,7 +3237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               type: "text",
               text: JSON.stringify({
                 success: true,
-                message: `Attachment ${filename} added to ${issue_key}`,
+                message: `Attachment ${safeFilename} added to ${issue_key}`,
                 attachments: Array.isArray(attachData) ? attachData.map((a: any) => ({
                   id: a.id,
                   filename: a.filename,
@@ -4540,21 +4734,28 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           return {
             content: [{ type: "text", text: `${metaLabel}\n\n${buffer.toString("utf-8")}` }],
           };
-        } else {
-          // PDF and other binaries — base64 in a text block
+        }
+
+        const extractedText = await extractAttachmentText(buffer, mimeType);
+        if (extractedText !== null) {
           return {
-            content: [{ type: "text", text: JSON.stringify({
-              success: true,
-              attachment_id,
-              filename,
-              mime_type: mimeType,
-              size_bytes: buffer.length,
-              encoding: "base64",
-              note: "Binary file returned as base64. Decode to access raw content.",
-              data: buffer.toString("base64"),
-            }, null, 2) }],
+            content: [{ type: "text", text: `${metaLabel}\n\n${extractedText}` }],
           };
         }
+
+        // PDF/Office (extraction disabled or failed) and other binaries — base64 in a text block
+        return {
+          content: [{ type: "text", text: JSON.stringify({
+            success: true,
+            attachment_id,
+            filename,
+            mime_type: mimeType,
+            size_bytes: buffer.length,
+            encoding: "base64",
+            note: "Binary file returned as base64. Decode to access raw content.",
+            data: buffer.toString("base64"),
+          }, null, 2) }],
+        };
       }
 
       // 53. GET ISSUE ATTACHMENTS BULK
